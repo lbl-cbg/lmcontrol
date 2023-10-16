@@ -37,6 +37,8 @@ def outlier_threshold_tol(img, tol=0.001, max_med=10, ntrim=15, nsig=1):
             break
         mask = tmp
 
+    return mask
+
 
 def outlier_cluster(img, frac=0.3, tol=0.001, max_med=10, ntrim=15, nsig=1):
     """
@@ -95,9 +97,12 @@ def trim_box(mask, img, size=None):
         Yn -= Ypad
         if (Xx - Xn) != size[0]:
             Xx += 1
-        if (Yx - Yn) != size[0]:
+        if (Yx - Yn) != size[1]:
             Yx += 1
-    return img[Xn: Xx, Yn: Yx]
+    ret = img[Xn: Xx, Yn: Yx]
+    if 0 in ret.shape:
+        raise ValueError(f"img has zero area, shape is {ret.shape}")
+    return ret
 
 
 def crop_image(img, size=None):
