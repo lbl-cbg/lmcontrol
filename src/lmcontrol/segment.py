@@ -10,6 +10,7 @@ from skimage.measure import label
 from skimage.morphology import closing
 from tqdm import tqdm
 
+from .utils import get_logger
 
 def outlier_threshold_tol(img, tol=0.001, max_med=10, ntrim=15, nsig=1):
     """
@@ -149,15 +150,30 @@ def crop_images(argv=None):
                         help='the size to crop images to (in pixels) for saving as ndarray. default is (64, 32)')
     args = parser.parse_args(argv)
 
+    logger = get_logger()
 
     dir_exists = False # only create unseg directory if there were any unsegmentable images
+    unseg_dir = os.path.join(args.output_dir, 'unseg')
 
     seg_images = list()
     seg_masks = list()
     paths = list()
     orig_seg_images = list()
     n_unseg = 0
-    for tif in tqdm(glob.glob(os.path.join(args.image_dir, "*.tif"))):
+
+    image_paths = glob.glob(os.path.join(args.image_dir, "*.tif"))
+
+    logger.info(f"Found {len(image_paths)} images in {args.image_dir}")
+    logger.info(f"Saving segmented images to {args.output_dir}")
+    if args.save_unseg:
+        logger.info(f"Saving any unsegmented images to {unseg_dir}")
+    else:
+        logger.info("Discarding unsegmented images")
+
+    npz_out = os.path.join(args.output_dir, "all_processed.npz")
+    logger.info(f"Cropping images to {args.crop} and saving to {npz_out} for convenience")
+
+    for tif in tqdm(image_paths):
         image = sio.imread(tif)[:, :, 0]
         try:
             #TODO: Add check for garbage images i.e. overdispersed images.
@@ -180,13 +196,15 @@ def crop_images(argv=None):
             paths.append(tif)
         except ValueError:
             if args.save_unseg:
-                target = os.path.join(args.output_dir, 'unseg', os.path.basename(tif))
+                target = os.path.join(unseg_dir, os.path.basename(tif))
                 if not dir_exists:
                     os.makedirs(os.path.dirname(target), exist_ok=True)
                     dir_exists = True
-                sio.imsave(target, img)
+                sio.imsave(target, image)
             n_unseg += 1
             continue
+
+    logger.info(f"Done segmenting images. {n_unseg} ({100 * n_unseg / len(image_paths):.1}%) images were unsegmentable")
 
     seg_images = np.array(seg_images)
     seg_masks = np.array(seg_masks)
@@ -199,4 +217,5 @@ def crop_images(argv=None):
         sio.imsave(target, image)
 
     # save cropped and rotate
-    np.savez(os.path.join(args.output_dir, "all_processed.npz"), masks=seg_masks, images=seg_images, paths=paths)
+    logger.info(f"Saving all cropped images to {npz_out}")
+    np.savez(npz_out, masks=seg_masks, images=seg_images, paths=paths)
