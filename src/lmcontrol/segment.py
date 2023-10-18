@@ -1,11 +1,14 @@
 import argparse
+import glob
+import os
 
 import numpy as np
+import scipy.ndimage as ndi
 from skimage.filters import median
 import skimage.io as sio
 from skimage.measure import label
 from skimage.morphology import closing
-import tqdm
+from tqdm import tqdm
 
 
 def outlier_threshold_tol(img, tol=0.001, max_med=10, ntrim=15, nsig=1):
@@ -120,25 +123,80 @@ def crop_image(img, size=None):
 
 
 def crop_images(argv=None):
+    """
+    Segment and images in a directory, saving segmented images to a
+    new directory. This will also save all images cropped and stored in
+    an ndarray for easy loading of cropped data.
+    """
 
-	n_unseg = 0
-	total = 0
-	masks = list()
-	for tif_path in tqdm(sorted(glob.glob(f"{image_path}/*/*.tif"))):
-	    total += 1
-	    target = tif_path.replace("S4/", "S4_seg/")
-	    os.makedirs(os.path.dirname(target), exist_ok=True)
-	    img = sio.imread(tif_path)[:, :, 0]
-	    try:
-	        #TODO: Add check for garbage images i.e. overdispersed images.
-	        if img.std() > 15:
-	            raise ValueError("StdDev of pixels is quite high, this is probably a bad image")
-	        mask = outlier_cluster(img)
-	    except ValueError:
-	        target = tif_path.replace("S4/", "S4_unseg/")
-	        os.makedirs(os.path.dirname(target), exist_ok=True)
-	        sio.imsave(target, img)
-	        n_unseg += 1
-	        continue
-	    new_img = trim_box(mask, img)
-	    sio.imsave(target, new_img)
+    def crop_size(string):
+        if len(string) == 0:
+            return (64, 32)
+        else:
+            try:
+                x, y = string.split(',')
+                x, y = int(x), int(y)
+                return (x, y)
+            except:
+                raise ArgumentTypeError()
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("image_dir", type=str, help='The directory containing images to crop')
+    parser.add_argument("output_dir", type=str, help='The directory to save cropped images to')
+    parser.add_argument("-u", "--save-unseg", action='store_true', default=False,
+                        help="Save unsegmentable images in output_dir under directory 'unseg'")
+    parser.add_argument('-c', '--crop', type=crop_size, default=(64, 32), metavar='SHAPE',
+                        help='the size to crop images to (in pixels) for saving as ndarray. default is (64, 32)')
+    args = parser.parse_args(argv)
+
+
+    dir_exists = False # only create unseg directory if there were any unsegmentable images
+
+    seg_images = list()
+    seg_masks = list()
+    paths = list()
+    orig_seg_images = list()
+    n_unseg = 0
+    for tif in tqdm(glob.glob(os.path.join(args.image_dir, "*.tif"))):
+        image = sio.imread(tif)[:, :, 0]
+        try:
+            #TODO: Add check for garbage images i.e. overdispersed images.
+            if image.std() > 15:
+                raise ValueError("StdDev of pixels is quite high, this is probably a bad image")
+            mask = outlier_cluster(image)
+            segi = trim_box(mask, image)
+            orig_seg_images.append(segi) # save segmented original image
+
+            # rotate image if cell is oriented horizontally
+            # and crop to standard size
+            if (segi.shape[1] / segi.shape[0]) >= 1.4:
+                image = ndi.rotate(image, -90)
+                mask = ndi.rotate(mask, -90)
+            segi = trim_box(mask, image, size=args.crop)
+            segm = trim_box(mask, mask, size=args.crop)
+
+            seg_images.append(segi)
+            seg_masks.append(segm)
+            paths.append(tif)
+        except ValueError:
+            if args.save_unseg:
+                target = os.path.join(args.output_dir, 'unseg', os.path.basename(tif))
+                if not dir_exists:
+                    os.makedirs(os.path.dirname(target), exist_ok=True)
+                    dir_exists = True
+                sio.imsave(target, img)
+            n_unseg += 1
+            continue
+
+    seg_images = np.array(seg_images)
+    seg_masks = np.array(seg_masks)
+    paths = np.array(paths)
+
+    # Save segmented original images
+    os.makedirs(args.output_dir, exist_ok=True)
+    for image, path in zip(orig_seg_images, paths):
+        target = os.path.join(args.output_dir, os.path.basename(path))
+        sio.imsave(target, image)
+
+    # save cropped and rotate
+    np.savez(os.path.join(args.output_dir, "all_processed.npz"), masks=seg_masks, images=seg_images, paths=paths)

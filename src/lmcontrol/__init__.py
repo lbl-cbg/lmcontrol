@@ -16,7 +16,7 @@ def main():
 
     command_dict = {
         'Segmentation': {
-            'crop': Command('segment.crop', 'Crop light microscopy images to bounding box around single cell'),
+            'crop': Command('segment.crop_images', 'Crop light microscopy images to bounding box around single cell'),
         },
     }
     import sys
