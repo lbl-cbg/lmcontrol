@@ -2,6 +2,7 @@ import argparse
 import glob
 import os
 
+from numba import njit
 import numpy as np
 import scipy.ndimage as ndi
 from skimage.filters import median
@@ -12,7 +13,20 @@ from tqdm import tqdm
 
 from .utils import get_logger
 
-def outlier_threshold_tol(img, tol=0.001, max_med=10, ntrim=15, nsig=1):
+
+@njit
+def _raw_outlier_mask(img):
+    mean = img.ravel().mean()
+    std = img.ravel().std()
+    mask = np.logical_or(img < mean - std, img > mean + std).astype(np.int64)
+    mask[:15] = 0
+    mask[-15:] = 0
+    mask[:, :15] = 0
+    mask[:, -15:] = 0
+    return mask
+
+
+def outlier_threshold_tol(img, tol=0.001, max_med=10):
     """
     Threshold gray scale image keeping only those pixels on the tails of the
     pixel value distribution.
@@ -25,14 +39,8 @@ def outlier_threshold_tol(img, tol=0.001, max_med=10, ntrim=15, nsig=1):
         nsig (int)       : the number of standard deviations above/below which to
                            set the threshold
     """
-    mean = img.ravel().mean()
-    std = img.ravel().std()
-    mask = np.logical_or(img < mean - nsig*std, img > mean + nsig*std).astype(int)
-    if ntrim > 0:
-        mask[:ntrim] = 0
-        mask[-ntrim:] = 0
-        mask[:, :ntrim] = 0
-        mask[:, -ntrim:] = 0
+
+    mask = _raw_outlier_mask(img)
 
     for i in range(max_med):
         tmp = median(mask.astype(int))
@@ -44,7 +52,12 @@ def outlier_threshold_tol(img, tol=0.001, max_med=10, ntrim=15, nsig=1):
     return mask
 
 
-def outlier_cluster(img, frac=0.3, tol=0.001, max_med=10, ntrim=15, nsig=1):
+class UnsegmentableError(ValueError):
+    """An Exception to raise when segmentation fails for known reasons"""
+    pass
+
+
+def outlier_cluster(img, frac=0.3, tol=0.001, max_med=10):
     """
     Find mask for cell using outlier thresholding.
 
@@ -58,22 +71,40 @@ def outlier_cluster(img, frac=0.3, tol=0.001, max_med=10, ntrim=15, nsig=1):
         frac (float)     : the minimum fraction of pixels required to belong to the
                            main cluster for declaring a main cluster found
     """
-    mask = outlier_threshold_tol(img, ntrim=15)
+    mask = outlier_threshold_tol(img)
     mask = closing(mask)
+    if mask.sum() / mask.size < 0.005:
+        raise UnsegmentableError("Not enough masked pixels to to cluster")
     if frac is not None:
         labels = label(mask)
         counts = np.bincount(labels.ravel())[1:]
         counts = (counts / counts.sum())
         cell_cluster_id = np.where(counts >= frac)[0]
         if len(cell_cluster_id) == 0:
-            raise ValueError("Unable to find one majority cluster")
+            raise UnsegmentableError("Unable to find one majority cluster")
 
         cell_cluster_id = cell_cluster_id[0] + 1
         mask = (labels == cell_cluster_id).astype(int)
     return mask
 
 
-def trim_box(mask, img, size=None):
+def _adjust_bounds(Xn, Xx, Yn, Yx, target_size):
+        Ydim = Yx - Yn
+        Xdim = Xx - Xn
+        Xpad = (target_size[0] - Xdim) // 2
+        Ypad = (target_size[1] - Ydim) // 2
+        Xx += Xpad
+        Xn -= Xpad
+        Yx += Ypad
+        Yn -= Ypad
+        if (Xx - Xn) != target_size[0]:
+            Xx += 1
+        if (Yx - Yn) != target_size[1]:
+            Yx += 1
+        return Xn, Xx, Yn, Yx
+
+
+def trim_box(mask, img, size=None, pad=True):
     """
     Crop image using bounding box calculated using the provided mask. The
     mask should have a single cluster for this function to have the intended
@@ -84,26 +115,38 @@ def trim_box(mask, img, size=None):
         img  (array)        : the image to crop
         size (tuple, list)  : the target size around the cluster found in *mask* that
                               *img* should be cropped to
+        pad (bool)          : If True, pad with zeros around image to shape specified by *size*,
+                              otherwise crop image to the specified size, centered on the mask.
 
     """
     mask = mask.astype(int)
-    X, Y = np.where(mask == 1)
-    Xx, Xn = X.max(), X.min()
-    Yx, Yn = Y.max(), Y.min()
+    Y, X = np.where(mask == 1)
+    Yx, Yn = Y.max() + 1, Y.min()
+    Xx, Xn = X.max() + 1, X.min()
+
     if size is not None:
-        Ydim = Yx - Yn
-        Xdim = Xx - Xn
-        Xpad = (size[0] - Xdim) // 2
-        Ypad = (size[1] - Ydim) // 2
-        Xx += Xpad
-        Xn -= Xpad
-        Yx += Ypad
-        Yn -= Ypad
-        if (Xx - Xn) != size[0]:
-            Xx += 1
-        if (Yx - Yn) != size[1]:
-            Yx += 1
-    ret = img[Xn: Xx, Yn: Yx]
+        if not pad:
+            Yn, Yx, Xn, Xx = _adjust_bounds(Yn, Yx, Xn, Xx, size)
+            ret = img[Yn: Yx, Xn: Xx]
+        else:
+            ret = img[Yn: Yx, Xn: Xx]
+            image_height, image_width = ret.shape
+            crop_height, crop_width = size
+            padding_ltrb = [[0, 0], [0, 0]]
+            w_d = crop_width - image_width
+            if w_d > 0:
+                padding_ltrb[1][0] = w_d // 2
+                padding_ltrb[1][1] = w_d // 2 + int(w_d % 2)
+            h_d = crop_height - image_height
+            if h_d > 0:
+                padding_ltrb[0][0] = h_d // 2
+                padding_ltrb[0][1] = h_d // 2 + int(h_d % 2)
+            ret = np.pad(ret, padding_ltrb, mode='constant', constant_values=0)
+            Yn, Yx, Xn, Xx = _adjust_bounds(0, ret.shape[0], 0, ret.shape[1], size)
+            ret = ret[Yn: Yx, Xn: Xx]
+    else:
+        ret = img[Yn: Yx, Xn: Xx]
+
     if 0 in ret.shape:
         raise ValueError(f"img has zero area, shape is {ret.shape}")
     return ret
@@ -176,25 +219,25 @@ def crop_images(argv=None):
     for tif in tqdm(image_paths):
         image = sio.imread(tif)[:, :, 0]
         try:
-            #TODO: Add check for garbage images i.e. overdispersed images.
+            #check for bad images caused by flow-cytometer and/or imaging errors
             if image.std() > 15:
-                raise ValueError("StdDev of pixels is quite high, this is probably a bad image")
+                raise UnsegmentableError("StdDev of pixels is quite high, this is probably a bad image")
             mask = outlier_cluster(image)
             segi = trim_box(mask, image)
             orig_seg_images.append(segi) # save segmented original image
+            paths.append(tif)
 
             # rotate image if cell is oriented horizontally
             # and crop to standard size
             if (segi.shape[1] / segi.shape[0]) >= 1.4:
                 image = ndi.rotate(image, -90)
                 mask = ndi.rotate(mask, -90)
-            segi = trim_box(mask, image, size=args.crop)
-            segm = trim_box(mask, mask, size=args.crop)
+            segi = trim_box(mask, image, size=args.crop, pad=True)
+            segm = trim_box(mask, mask, size=args.crop, pad=True)
 
             seg_images.append(segi)
             seg_masks.append(segm)
-            paths.append(tif)
-        except ValueError:
+        except UnsegmentableError:
             if args.save_unseg:
                 target = os.path.join(unseg_dir, os.path.basename(tif))
                 if not dir_exists:
@@ -204,7 +247,7 @@ def crop_images(argv=None):
             n_unseg += 1
             continue
 
-    logger.info(f"Done segmenting images. {n_unseg} ({100 * n_unseg / len(image_paths):.1}%) images were unsegmentable")
+    logger.info(f"Done segmenting images. {n_unseg} ({100 * n_unseg / len(image_paths):.1f}%) images were unsegmentable")
 
     seg_images = np.array(seg_images)
     seg_masks = np.array(seg_masks)
