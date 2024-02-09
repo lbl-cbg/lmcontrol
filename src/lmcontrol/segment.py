@@ -191,6 +191,8 @@ def crop_images(argv=None):
                         help="Save unsegmentable images in output_dir under directory 'unseg'")
     parser.add_argument('-c', '--crop', type=crop_size, default=(64, 32), metavar='SHAPE',
                         help='the size to crop images to (in pixels) for saving as ndarray. default is (64, 32)')
+    parser.add_argument('-p', '--pad', default=False,
+                        help='pad segmented image with zeros to size indicated with --crop. Otherwise use pad with original image contents')
     args = parser.parse_args(argv)
 
     logger = get_logger()
@@ -232,8 +234,8 @@ def crop_images(argv=None):
             if (segi.shape[1] / segi.shape[0]) >= 1.4:
                 image = ndi.rotate(image, -90)
                 mask = ndi.rotate(mask, -90)
-            segi = trim_box(mask, image, size=args.crop, pad=True)
-            segm = trim_box(mask, mask, size=args.crop, pad=True)
+            segi = trim_box(mask, image, size=args.crop, pad=args.pad)
+            segm = trim_box(mask, mask, size=args.crop, pad=args.pad)
 
             seg_images.append(segi)
             seg_masks.append(segm)
