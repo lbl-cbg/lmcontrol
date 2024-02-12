@@ -1,0 +1,10 @@
+numpy
+scikit-image
+scikit-learn
+scipy
+tqdm
+umap-learn
+plotly
+dash
+matplotlib
+seaborn

@@ -30,14 +30,14 @@ def load_mini_mnist():
     return data
 
 
-def load_data(path, label='time'):
+def load_data(path):
     npz = np.load(path)
-    return npz['images'], npz['embedding'], npz[label+'_labels'], npz[label+'_classes']
-
-    # Load the data
-    #data = load_mini_mnist()
-    #images = data['images']
-    #labels = data['labels']
+    labels = dict()
+    for k in npz.keys():
+        if '_labels' in k:
+            label = k[:-7]
+            labels[label] = {'labels': npz[label+'_labels'], 'classes': npz[label+'_classes']}
+    return npz['images'], npz['embedding'], labels
 
 
 def prob(string):
@@ -54,13 +54,27 @@ def interactive_embedding_viz(argv=None):
 
     args = parser.parse_args(argv)
 
-    images, emb, labels, classes = load_data(args.npz, label=args.label)
+    images, emb, all_labels = load_data(args.npz)
 
     if args.subsample:
-        idx, _ = train_test_split(np.arange(len(images)), train_size=args.subsample, stratify=labels)
+        idx, _ = train_test_split(np.arange(len(images)), train_size=args.subsample, stratify=all_labels[args.label]['labels'])
         images = images[idx]
         emb = emb[idx]
-        labels = labels[idx]
+        for k in all_labels:
+            all_labels[k]['labels'] = all_labels[k]['labels'][idx]
+
+    classes = all_labels[args.label]['classes']
+    labels = all_labels[args.label]['labels']
+
+
+    display_text = list()
+    for i in range(len(labels)):
+        tmp = list()
+        for k in all_labels:
+            c = all_labels[k]['classes'][all_labels[k]['labels'][i]]
+            tmp.append(f"{k}: {c}")
+
+        display_text.append(" | ".join(tmp))
 
     # Color for each label
     color_map = sns.color_palette(n_colors=len(np.unique(labels)))
@@ -115,7 +129,8 @@ def interactive_embedding_viz(argv=None):
                     src=im_url,
                     style={"width": "50px", 'display': 'block', 'margin': '0 auto'},
                 ),
-                html.P("Label: " + str(classes[labels[num]]), style={'font-weight': 'bold'})
+                html.P(str(display_text[num]), style={'font-weight': 'bold'})
+                #html.P("Label: " + str(classes[labels[num]]), style={'font-weight': 'bold'})
             ])
         ]
 

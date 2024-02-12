@@ -17,7 +17,7 @@ def main():
     command_dict = {
         'Segmentation': {
             'crop': Command('segment.crop_images', 'Crop light microscopy images to bounding box around single cell'),
-            'emb-viz': Command('viz.interactive_embedding_viz', 'Interactive viewer of image embeddings'),
+            'emb-viz': Command('viz.interactive_viz.interactive_embedding_viz', 'Interactive viewer of image embeddings'),
         },
     }
     import sys
