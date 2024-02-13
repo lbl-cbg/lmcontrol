@@ -166,6 +166,16 @@ def crop_image(img, size=None):
     return new_img
 
 
+def metadata(string):
+    if len(string):
+        try:
+            ret = {k:v for k, v in (tuple(kv.split("=")) for kv in string.split(","))}
+        except:
+            raise argparse.ArgumentTypeError()
+        return ret
+    return dict()
+
+
 def crop_images(argv=None):
     """
     Segment and images in a directory, saving segmented images to a
@@ -191,8 +201,9 @@ def crop_images(argv=None):
                         help="Save unsegmentable images in output_dir under directory 'unseg'")
     parser.add_argument('-c', '--crop', type=crop_size, default=(64, 32), metavar='SHAPE',
                         help='the size to crop images to (in pixels) for saving as ndarray. default is (64, 32)')
-    parser.add_argument('-p', '--pad', default=False,
+    parser.add_argument('-p', '--pad', default=False, action='store_true',
                         help='pad segmented image with zeros to size indicated with --crop. Otherwise use pad with original image contents')
+    parser.add_argument("-m", "--metadata", help="a comma-separated list of key=value pairs. e.g. ht=1,time=S4", default="", type=metadata)
     args = parser.parse_args(argv)
 
     logger = get_logger()
@@ -263,4 +274,4 @@ def crop_images(argv=None):
 
     # save cropped and rotate
     logger.info(f"Saving all cropped images to {npz_out}")
-    np.savez(npz_out, masks=seg_masks, images=seg_images, paths=paths)
+    np.savez(npz_out, masks=seg_masks, images=seg_images, paths=paths, **args.metadata)
