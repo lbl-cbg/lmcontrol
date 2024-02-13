@@ -176,7 +176,7 @@ def metadata(string):
     return dict()
 
 
-def crop_images(argv=None):
+def main(argv=None):
     """
     Segment and images in a directory, saving segmented images to a
     new directory. This will also save all images cropped and stored in
@@ -275,3 +275,7 @@ def crop_images(argv=None):
     # save cropped and rotate
     logger.info(f"Saving all cropped images to {npz_out}")
     np.savez(npz_out, masks=seg_masks, images=seg_images, paths=paths, **args.metadata)
+
+
+if __name__ == "__main__":
+    main()

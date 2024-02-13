@@ -45,7 +45,7 @@ def prob(string):
     if ret > 1.0 or ret < 0.0:
         raise argparse.ArgumentTypeError()
 
-def interactive_embedding_viz(argv=None):
+def main(argv=None):
 
     parser = argparse.ArgumentParser()
     parser.add_argument('npz', help='the NumPy file archive containing data for plotting')
@@ -139,5 +139,5 @@ def interactive_embedding_viz(argv=None):
     app.run(debug=True)
 
 if __name__ == "__main__":
-    interactive_embedding_viz()
+    main()
 

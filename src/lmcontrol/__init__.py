@@ -16,8 +16,9 @@ def main():
 
     command_dict = {
         'Segmentation': {
-            'crop': Command('segment.crop_images', 'Crop light microscopy images to bounding box around single cell'),
-            'emb-viz': Command('viz.interactive_viz.interactive_embedding_viz', 'Interactive viewer of image embeddings'),
+            'crop': Command('segment.main', 'Crop light microscopy images to bounding box around single cell'),
+            'prep-viz': Command('viz.make_package.main', 'Prepare package for visualizing image embeddings'),
+            'emb-viz': Command('viz.interactive_viz.main', 'Interactive viewer of image embeddings'),
         },
     }
     import sys
@@ -39,7 +40,9 @@ def main():
                 func = func.get_func()
                 break
         if func is not None:
-            func(sys.argv[2:])
+            argv = sys.argv[2:]
+            sys.argv[0] = sys.argv[0] + " " + sys.argv[1]
+            func(argv)
         else:
             print("Unrecognized command: '%s'" % cmd, file=sys.stderr)
 
