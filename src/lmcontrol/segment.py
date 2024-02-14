@@ -120,16 +120,24 @@ def trim_box(mask, img, size=None, pad=True):
 
     """
     mask = mask.astype(int)
-    Y, X = np.where(mask == 1)
-    Yx, Yn = Y.max() + 1, Y.min()
+    X, Y = np.where(mask == 1)
     Xx, Xn = X.max() + 1, X.min()
+    Yx, Yn = Y.max() + 1, Y.min()
 
     if size is not None:
         if not pad:
-            Yn, Yx, Xn, Xx = _adjust_bounds(Yn, Yx, Xn, Xx, size)
-            ret = img[Yn: Yx, Xn: Xx]
+            Xn, Xx, Yn, Yx = _adjust_bounds(Xn, Xx, Yn, Yx, size)
+            if Xn < 0:
+                Xn, Xx = 0, Xx - Xn
+            elif Xx > mask.shape[0]:
+                Xn, Xx = Xn - (Xx - mask.shape[0]), mask.shape[0]
+            if Yn < 0:
+                Yn, Yx = 0, Yx - Yn
+            elif Yx > mask.shape[0]:
+                Yn, Yx = Yn - (Yx - mask.shape[0]), mask.shape[0]
+            ret = img[Xn: Xx, Yn: Yx]
         else:
-            ret = img[Yn: Yx, Xn: Xx]
+            ret = img[Xn: Xx, Yn: Yx]
             image_height, image_width = ret.shape
             crop_height, crop_width = size
             padding_ltrb = [[0, 0], [0, 0]]
@@ -142,10 +150,10 @@ def trim_box(mask, img, size=None, pad=True):
                 padding_ltrb[0][0] = h_d // 2
                 padding_ltrb[0][1] = h_d // 2 + int(h_d % 2)
             ret = np.pad(ret, padding_ltrb, mode='constant', constant_values=0)
-            Yn, Yx, Xn, Xx = _adjust_bounds(0, ret.shape[0], 0, ret.shape[1], size)
-            ret = ret[Yn: Yx, Xn: Xx]
+            Xn, Xx, Yn, Yx = _adjust_bounds(0, ret.shape[0], 0, ret.shape[1], size)
+            ret = ret[Xn: Xx, Yn: Yx]
     else:
-        ret = img[Yn: Yx, Xn: Xx]
+        ret = img[Xn: Xx, Yn: Yx]
 
     if 0 in ret.shape:
         raise ValueError(f"img has zero area, shape is {ret.shape}")
@@ -194,11 +202,23 @@ def main(argv=None):
             except:
                 raise ArgumentTypeError()
 
-    parser = argparse.ArgumentParser()
+    desc = "Identify cells in flow-cytometer images and crop images down to single cells"
+    epi = """
+    Segmented and cropped images are saved to the same name in output_dir. Separately, all
+    images are cropped to the same size and saved to a NPZ file (named all_processed.npz) in
+    output_dir. Saving of individual images can be turned off using the -n flag.
+    Metadata about all images in image_dir can be saved to the NPZ file using the -m flag.
+    This feature is useful if you plan to merge multiple NPZ files for interactive viewing.
+    Some images are unsegmentable. These images can be saved to the output_dir/unseg using
+    the -u flag.
+    """
+    parser = argparse.ArgumentParser(description=desc, epilog=epi)
     parser.add_argument("image_dir", type=str, help='The directory containing images to crop')
     parser.add_argument("output_dir", type=str, help='The directory to save cropped images to')
     parser.add_argument("-u", "--save-unseg", action='store_true', default=False,
                         help="Save unsegmentable images in output_dir under directory 'unseg'")
+    parser.add_argument("-n", "--no-tifs", action='store_true', default=False,
+                        help="Do not save cropped TIF files i.e. only save the all_processed.npz file")
     parser.add_argument('-c', '--crop', type=crop_size, default=(64, 32), metavar='SHAPE',
                         help='the size to crop images to (in pixels) for saving as ndarray. default is (64, 32)')
     parser.add_argument('-p', '--pad', default=False, action='store_true',
@@ -266,11 +286,12 @@ def main(argv=None):
     seg_masks = np.array(seg_masks)
     paths = np.array(paths)
 
-    # Save segmented original images
     os.makedirs(args.output_dir, exist_ok=True)
-    for image, path in zip(orig_seg_images, paths):
-        target = os.path.join(args.output_dir, os.path.basename(path))
-        sio.imsave(target, image)
+    # Save segmented original images
+    if not args.no_tifs:
+        for image, path in zip(orig_seg_images, paths):
+            target = os.path.join(args.output_dir, os.path.basename(path))
+            sio.imsave(target, image)
 
     # save cropped and rotate
     logger.info(f"Saving all cropped images to {npz_out}")
