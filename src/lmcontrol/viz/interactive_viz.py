@@ -80,6 +80,13 @@ def main(argv=None):
     color_map = sns.color_palette(n_colors=len(np.unique(labels)))
     colors = [color_map[label] for label in labels]
 
+
+    layout = go.Layout(
+        margin={'l': 0, 'r': 0, 'b': 0, 't': 0},
+        autosize=True,
+        height=700
+    )
+
     fig = go.Figure(data=[go.Scatter3d(
         x=emb[:, 0],
         y=emb[:, 1],
@@ -89,7 +96,7 @@ def main(argv=None):
             size=2,
             color=colors,
         )
-    )])
+    )], layout=layout)
 
     fig.update_traces(
         hoverinfo="none",
