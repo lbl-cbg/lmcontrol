@@ -87,15 +87,18 @@ def main(argv=None):
         height=700
     )
 
-    fig = go.Figure(data=[go.Scatter3d(
-        x=emb[:, 0],
-        y=emb[:, 1],
-        z=emb[:, 2],
+    scatter = go.Scatter
+    kwargs = dict(x=emb[:, 0], y=emb[:, 1])
+    if emb.shape[1]== 3:
+        kwargs['z'] = emb[:, 2]
+        scatter = go.Scatter3d
+    fig = go.Figure(data=[scatter(
         mode='markers',
         marker=dict(
             size=2,
             color=colors,
-        )
+        ),
+        **kwargs
     )], layout=layout)
 
     fig.update_traces(
