@@ -15,46 +15,7 @@ with warnings.catch_warnings():
 from sklearn.preprocessing import LabelEncoder
 
 from ..utils import get_logger
-
-
-def load_data(npzs, logger):
-    """Load data from NPZ files generated from lmcontrol crop command"""
-    masks = list()
-    images = list()
-
-    metadata = dict()
-    for npz_path in npzs:
-        logger.info(f"Reading {npz_path}")
-        npz = np.load(npz_path)
-        masks.append(npz['masks'])
-        images.append(npz['images'])
-
-        # read metadata found in NPZ files
-        md_keys = set(npz.keys()) - {'paths', 'masks', 'images'}
-        logging.debug(f"Found the following keys in {npz_path}: {' '.join(sorted(md_keys))}", file=sys.stderr)
-        for k in md_keys:
-            v = metadata.setdefault(k, list())
-            v.extend([str(npz[k])] * len(npz['masks']))
-
-
-    # merge all image arrays
-    masks = np.concatenate(masks)
-    images = np.concatenate(images)
-
-    target_len = len(masks)
-    error = False
-
-    # make sure all metadata keys were found in all NPZ files
-    for k in metadata.keys():
-        metadata[k] = np.array(metadata[k])
-        if len(metadata[k]) != target_len:
-            logging.critical(f"Metadata '{k}' not found in all NPZ files", file=sys.stderr)
-            error = True
-
-    if error:
-        sys.exit(1)
-
-    return masks, images, metadata
+from ..data_utils import load_npzs
 
 
 def compute_embedding(data, logger, metric='euclidean', two_d=False, center_images=False):
@@ -103,7 +64,7 @@ def main(argv=None):
     if args.verbose:
         logger.setLevel(logging.DEBUG)
 
-    masks, images, metadata = load_data(args.npzs, logger)
+    masks, images, paths, metadata = load_npzs(args.npzs, logger)
 
     labels = prepare_labels(metadata)
 
