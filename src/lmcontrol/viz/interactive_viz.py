@@ -80,16 +80,26 @@ def main(argv=None):
     color_map = sns.color_palette(n_colors=len(np.unique(labels)))
     colors = [color_map[label] for label in labels]
 
-    fig = go.Figure(data=[go.Scatter3d(
-        x=emb[:, 0],
-        y=emb[:, 1],
-        z=emb[:, 2],
+
+    layout = go.Layout(
+        margin={'l': 0, 'r': 0, 'b': 0, 't': 0},
+        autosize=True,
+        height=700
+    )
+
+    scatter = go.Scatter
+    kwargs = dict(x=emb[:, 0], y=emb[:, 1])
+    if emb.shape[1]== 3:
+        kwargs['z'] = emb[:, 2]
+        scatter = go.Scatter3d
+    fig = go.Figure(data=[scatter(
         mode='markers',
         marker=dict(
             size=2,
             color=colors,
-        )
-    )])
+        ),
+        **kwargs
+    )], layout=layout)
 
     fig.update_traces(
         hoverinfo="none",
