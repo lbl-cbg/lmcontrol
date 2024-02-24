@@ -1,17 +1,16 @@
 import argparse
 import glob
+
 import lightning as L
 from lightning.pytorch.loggers import CSVLogger
 from lightning.pytorch.callbacks.early_stopping import EarlyStopping
-
-
-
+import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from lmcontrol.utils import get_logger
-from lmcontrol.nn.dataset import get_lightly_dataset, get_transforms
-from lmcontrol.nn.byol import get_transform as BYOLTransform, BYOL
+from ..utils import get_logger
+from .dataset import get_lightly_dataset, get_transforms
+from .byol import get_transform as BYOLTransform, BYOL
 
 
 def get_npzs(timepoints, hts):
@@ -77,6 +76,40 @@ def main(argv=None):
                         callbacks=[EarlyStopping(monitor=model.val_metric, min_delta=0.001, patience=3, mode="min")])
 
     trainer.fit(model=model, train_dataloaders=train_dl, val_dataloaders=val_dl)
+
+def predict(argv=None):
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("checkpoint", type=str, help="path to the model checkpoint file to use for inference")
+    parser.add_argument("output", type=str, help="the path to save the embeddings to. Saved in NPZ format")
+    parser.add_argument("-d", "--debug", action='store_true', help="run with a small dataset", default=False)
+
+    args = parser.parse_args(argv)
+
+    logger = get_logger('info')
+
+    if args.debug:
+        test_files = sorted(glob.glob(f"S4/*HT1/*.npz"))
+    else:
+        test_files = sorted(glob.glob(f"S*/*HT*/*.npz"))
+
+    transform = get_transforms('crop', 'float', 'rgb')
+    logger.info(f"Loading training data: {len(test_files)} files")
+    test_dataset = get_lightly_dataset(test_files, transform=transform, logger=logger)
+
+    test_dl = DataLoader(test_dataset, batch_size=512, shuffle=False, drop_last=False, num_workers=3)
+
+    model = BYOL.load_from_checkpoint(args.checkpoint)
+    accelerator = "gpu" if torch.cuda.is_available() else "cpu"
+    trainer = L.Trainer(devices=1, accelerator=accelerator)
+
+    logger.info("Running predictions witih Lightning")
+    predictions = trainer.predict(model, test_dl)
+
+    predictions = torch.cat(predictions).numpy()
+
+    np.savez(args.output, predictions=predictions)
+
 
 if __name__ == '__main__':
     main()

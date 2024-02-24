@@ -73,6 +73,10 @@ class BYOL(L.LightningModule):
         self.log(self.val_metric, loss, batch_size=x0.size(0))
         return loss
 
+    def predict_step(self, batch, batch_idx, dataloader_idx=0):
+        x = batch[0]
+        return self.backbone(x).flatten(start_dim=1)
+
     def configure_optimizers(self):
         return torch.optim.SGD(self.parameters(), lr=0.06)
 
