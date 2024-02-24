@@ -42,6 +42,10 @@ class LMDataset(Dataset):
         Args:
             npzs (array-like)       : A list or tuple of paths to NPZ files containing cropped images
         """
+        if not isinstance(npzs, (list, tuple, np.ndarray, torch.Tensor)):
+            raise ValueError(f"Got unexpected type ({type(npzs)}) for argument 'npzs'. Must be an array-like")
+        elif len(npzs) == 0:
+            raise ValueError("Got empty array-like for argument 'npzs'")
         logger = logger or get_logger('warning')
         masks, images, paths, metadata = load_npzs(npzs, logger)
         if use_masks:

@@ -14,7 +14,7 @@ def load_npzs(npzs, logger):
 
     metadata = dict()
     for npz_path in npzs:
-        logger.info(f"Reading {npz_path}")
+        logger.debug(f"Reading {npz_path}")
         npz = np.load(npz_path)
         masks.append(npz['masks'])
         images.append(npz['images'])

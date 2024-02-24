@@ -28,7 +28,7 @@ keywords = [
 dependencies = [
     "matplotlib",
     "seaborn",
-    "plotly", 
+    "plotly",
     "numpy",
     "scipy",
     "scikit-learn",

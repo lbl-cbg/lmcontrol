@@ -20,6 +20,9 @@ class BYOL(L.LightningModule):
     # from the paper. The settings are chosen such that the example can easily be
     # run on a small dataset with a single GPU.
 
+    val_metric = "validation_ncs"
+    train_metric = "train_ncs"
+
     def __init__(self):
         super().__init__()
         resnet = torchvision.models.resnet18()
@@ -57,6 +60,17 @@ class BYOL(L.LightningModule):
         p1 = self.forward(x1)
         z1 = self.forward_momentum(x1)
         loss = 0.5 * (self.criterion(p0, z1) + self.criterion(p1, z0))
+        self.log(self.train_metric, loss, batch_size=x0.size(0))
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        (x0, x1) = batch[0]
+        p0 = self.forward(x0)
+        z0 = self.forward_momentum(x0)
+        p1 = self.forward(x1)
+        z1 = self.forward_momentum(x1)
+        loss = 0.5 * (self.criterion(p0, z1) + self.criterion(p1, z0))
+        self.log(self.val_metric, loss, batch_size=x0.size(0))
         return loss
 
     def configure_optimizers(self):
