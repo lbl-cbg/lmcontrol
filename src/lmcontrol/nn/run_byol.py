@@ -81,21 +81,23 @@ def predict(argv=None):
 
     parser = argparse.ArgumentParser()
     parser.add_argument("checkpoint", type=str, help="path to the model checkpoint file to use for inference")
-    parser.add_argument("output", type=str, help="the path to save the embeddings to. Saved in NPZ format")
+    parser.add_argument("output_npz", type=str, help="the path to save the embeddings to. Saved in NPZ format")
     parser.add_argument("-d", "--debug", action='store_true', help="run with a small dataset", default=False)
+    parser.add_argument("-p", "--pred-only", action='store_true', default=False,
+                        help="only save predictions, otherwise save original image data and labels in output_npz")
 
     args = parser.parse_args(argv)
 
     logger = get_logger('info')
 
     if args.debug:
-        test_files = sorted(glob.glob(f"S4/*HT1/*.npz"))
+        test_files = sorted(glob.glob(f"S4/*HT*1/*.npz"))
     else:
         test_files = sorted(glob.glob(f"S*/*HT*/*.npz"))
 
     transform = get_transforms('crop', 'float', 'rgb')
     logger.info(f"Loading training data: {len(test_files)} files")
-    test_dataset = get_lightly_dataset(test_files, transform=transform, logger=logger)
+    test_dataset = get_lightly_dataset(test_files, transform=transform, logger=logger, return_labels=True)
 
     test_dl = DataLoader(test_dataset, batch_size=512, shuffle=False, drop_last=False, num_workers=3)
 
@@ -105,10 +107,18 @@ def predict(argv=None):
 
     logger.info("Running predictions witih Lightning")
     predictions = trainer.predict(model, test_dl)
-
     predictions = torch.cat(predictions).numpy()
 
-    np.savez(args.output, predictions=predictions)
+    out_data = dict(predictions=predictions)
+
+    if not args.pred_only:
+        dset = test_dataset.dataset
+        out_data['images'] = np.asarray(torch.squeeze(dset.data))
+        for i, k in enumerate(dset.label_types):
+            out_data[k + "_classes"] = dset.label_classes[i]
+            out_data[k + "_labels"] = np.asarray(dset.labels[:, i])
+
+    np.savez(args.output_npz, **out_data)
 
 
 if __name__ == '__main__':

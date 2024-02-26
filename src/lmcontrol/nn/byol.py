@@ -23,11 +23,23 @@ class BYOL(L.LightningModule):
     val_metric = "validation_ncs"
     train_metric = "train_ncs"
 
-    def __init__(self):
+    def __init__(self, model="resnet18"):
         super().__init__()
-        resnet = torchvision.models.resnet18()
+        if model == "resnet18":
+            resnet = torchvision.models.resnet18()
+            n_features = 512
+        elif model == "resnet50":
+            resnet = torchvision.models.resnet50()
+            n_features = 2048
+        elif model == "convnext_tiny":
+            resnet = torchvision.models.convnext_tiny()
+            n_features = 768
+        else:
+            raise ValueError(f"Unrecognized model: '{model}'")
+
+
         self.backbone = nn.Sequential(*list(resnet.children())[:-1])
-        self.projection_head = BYOLProjectionHead(512, 1024, 256)
+        self.projection_head = BYOLProjectionHead(n_features, 1024, 256)
         self.prediction_head = BYOLPredictionHead(256, 1024, 256)
 
         self.backbone_momentum = copy.deepcopy(self.backbone)

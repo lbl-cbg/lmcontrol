@@ -5,7 +5,7 @@ from torch.utils.data import Dataset
 import torchvision.transforms.v2 as T
 
 
-from ..data_utils import load_npzs
+from ..data_utils import encode_labels, load_npzs
 from ..utils import get_logger
 
 
@@ -56,11 +56,26 @@ class LMDataset(Dataset):
         self.paths = tuple(paths)
         self.transform = None
 
+        self.labels = None
+        self.label_classes = None
+        self.label_types = None
+        if return_labels:
+            tmp = list()
+            self.label_classes = list()
+            self.label_types = list()
+            for k in metadata:
+                self.label_types.append(k)
+                labels, classes = encode_labels(metadata[k])
+                self.label_classes.append(classes)
+                tmp.append(labels)
+            self.labels = torch.from_numpy(np.stack(tmp, axis=1))
+
     def __getitem__(self, i):
         ret = self.data[i]
         if self.transform is not None:
             ret = self.transform(ret)
-        return ret, -1
+        labels = -1 if self.labels is None else self.labels[i]
+        return ret, labels
 
     def __len__(self):
         return len(self.data)

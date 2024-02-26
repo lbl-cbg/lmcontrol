@@ -1,4 +1,5 @@
 import numpy as np
+from sklearn.preprocessing import LabelEncoder
 
 from .utils import get_logger
 
@@ -51,3 +52,12 @@ def load_npzs(npzs, logger):
         raise ValueError("NPZ files do not have the same metadata keys. See CRITICAL messages in logs for more details")
 
     return masks, images, paths, metadata
+
+def encode_labels(labels, return_classes=True):
+    """This is a wrapper for sklearn.preprocessing.LabelEncoder"""
+    enc = LabelEncoder().fit(labels)
+    if return_classes:
+        return enc.transform(labels), enc.classes_
+    else:
+        return enc.transform(labels)
+
