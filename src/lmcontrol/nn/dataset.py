@@ -27,12 +27,28 @@ class GaussianNoise(T._transform.Transform):
             snr = self.sigma
             if isinstance(self.sigma, tuple):
                 snr = torch.randint(low=self.sigma[0], high=self.sigma[1], size=(1,))
-            sigma = mu / snr
+            sigma = mu.abs() / snr
             noise = torch.normal(torch.zeros(sample.shape), sigma)
             if sample.dtype == torch.uint8:
                 noise = noise.to(torch.uint8)
             return sample + noise
         return sample
+
+
+class Norm(T._transform.Transform):
+    """Independently normalize images"""
+
+    @staticmethod
+    def T(t):
+        if t.ndim == 2:
+            return t.T
+        elif t.ndim == 1 or t.ndim == 0:
+            return t
+        else:
+            return t.permute(*torch.arange(t.ndim - 1, -1, -1))
+
+    def __call__(self, sample: torch.Tensor) -> torch.Tensor:
+        return self.T(self.T(sample) - self.T(sample.mean(dim=(-2, -1))))
 
 
 class LMDataset(Dataset):
@@ -94,6 +110,7 @@ TRANSFORMS = {
         'noise': GaussianNoise(sigma=(10, 12)),
         'rgb': T.Lambda(lambda x: x.repeat(3, 1, 1) if x.ndim == 3 else x.repeat(1, 3, 1, 1)),
         'float': T.Lambda(lambda x: x.to(torch.float32)),
+        'norm': Norm(),
 }
 
 
@@ -101,6 +118,8 @@ def get_transforms(*transforms):
     """Return a transforms appropriate for Ambr light microscopy data
 
     The following transforms and their respective keys are:
+        norm:       Normalize the image by subtracting the mean pixel value from
+                    image
         blur:       A Gaussian Blur
         rotate:     Random rotation of up to 180 degrees in either direction
         crop:       Center crop images to 64x64 pixels
@@ -113,7 +132,7 @@ def get_transforms(*transforms):
 
     Args:
         transforms: the list of transforms to get. Valid options are 'blur', 'rotate', 'crop',
-                    'hflip', 'vflip', 'noise', 'rgb', 'float'.
+                    'hflip', 'vflip', 'noise', 'rgb', 'float', 'norm'
     Returns:
         a single transform or a Compose object pipeline with transforms in the order they
         are given. If no transforms are specified, the identity transform will be returned

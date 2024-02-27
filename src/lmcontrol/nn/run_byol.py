@@ -36,14 +36,16 @@ def main(argv=None):
     if args.debug:
         train_files = get_npzs(["14", "4"], ["1"])
         val_files = get_npzs(["10"], ["5"])
+        num_workers = 0
     else:
         train_files = get_npzs(["4", "14"], ["1", "2", "3", "4", "6", "7", "8", "9", "11", "12"])
         val_files = get_npzs(["10"], ["5", "10"])
+        num_workers = 3
 
     train_tfm = BYOLTransform()
     val_tfm = BYOLTransform(
-            transform1=get_transforms('rotate', 'crop', 'hflip', 'vflip', 'float', 'rgb'),
-            transform2=get_transforms('crop', 'float', 'rgb'),
+            transform1=get_transforms('float', 'rotate', 'crop', 'hflip', 'vflip', 'rgb'),
+            transform2=get_transforms('float', 'crop', 'rgb'),
             )
 
     logger.info(f"Loading training data: {len(train_files)} files")
@@ -58,7 +60,7 @@ def main(argv=None):
         batch_size=256,
         shuffle=True,
         drop_last=True,
-        num_workers=3,
+        num_workers=num_workers,
     )
 
     val_dl = DataLoader(
@@ -66,7 +68,7 @@ def main(argv=None):
         batch_size=256,
         shuffle=False,
         drop_last=True,
-        num_workers=3,
+        num_workers=num_workers,
     )
 
     accelerator = "gpu" if torch.cuda.is_available() else "cpu"
@@ -95,7 +97,7 @@ def predict(argv=None):
     else:
         test_files = sorted(glob.glob(f"S*/*HT*/*.npz"))
 
-    transform = get_transforms('crop', 'float', 'rgb')
+    transform = get_transforms('float', 'norm', 'crop', 'rgb')
     logger.info(f"Loading training data: {len(test_files)} files")
     test_dataset = get_lightly_dataset(test_files, transform=transform, logger=logger, return_labels=True)
 

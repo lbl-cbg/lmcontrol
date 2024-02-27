@@ -103,9 +103,9 @@ def get_transform(transform1=None, transform2=None):
     For more details on these transforms, see lmcontrol.nn.dataset.get_transform
     """
     if transform1 is None:
-        transform1 = _get_transforms('rotate', 'crop', 'hflip', 'vflip', 'float', 'rgb')
+        transform1 = _get_transforms('float', 'norm', 'rotate', 'crop', 'hflip', 'vflip', 'rgb')
     if transform2 is None:
-        transform2 = _get_transforms('blur', 'rotate', 'crop', 'hflip', 'vflip', 'float', 'noise', 'rgb')
+        transform2 = _get_transforms('float', 'norm', 'blur', 'rotate', 'crop', 'hflip', 'vflip', 'noise', 'rgb')
 
     transform = BYOLTransform(
         view_1_transform=transform1,

@@ -59,6 +59,9 @@ def main(argv=None):
     if args.verbose:
         logger.setLevel(logging.DEBUG)
 
+    if args.out_npz in args.npzs:
+        print(f"Output path {args.out_npz} found in input NPZs. Please provide another output path", file=sys.stderr)
+
     metric = 'euclidean'
     if len(args.npzs) == 1 and 'predictions' in np.load(args.npzs[0]).files:
         npz = np.load(args.npzs[0])
@@ -67,6 +70,7 @@ def main(argv=None):
         for k in npz.files:
             if '_labels' in k or '_classes' in k:
                 labels[k] = npz[k]
+        images = npz['images']
     else:
         masks, images, paths, metadata = load_npzs(args.npzs, logger)
         labels = prepare_labels(metadata)
