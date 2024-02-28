@@ -67,6 +67,7 @@ def main(argv=None):
         for k in all_labels:
             all_labels[k]['labels'] = all_labels[k]['labels'][idx]
 
+
     # Compute display label
     display_text = list()
     for i in range(len(emb)):
@@ -78,34 +79,41 @@ def main(argv=None):
         display_text.append(" | ".join(tmp))
 
 
-    #scatter = go.Scatter
-    #fig_kwargs = dict(x=emb[:, 0], y=emb[:, 1])
-    #if emb.shape[1]== 3:
-    #    fig_kwargs['z'] = emb[:, 2]
-    #    scatter = go.Scatter3d
-
-    #colors = dict()
-    #dd_options = list()
-    #for k in all_labels:
-    #    dd_options.append({'label': k, 'value': k})
-    #    classes = all_labels[k]['classes']
-    #    labels = all_labels[k]['labels']
-    #    color_map = sns.color_palette(n_colors=len(classes))
-    #    colors[k] = [color_map[label] for label in labels]
-
-    scatter = px.scatter
-    data = dict(x=emb[:, 0], y=emb[:, 1])
+    # Set up data for graph object
+    scatter = go.Scatter
+    fig_kwargs = dict(x=emb[:, 0], y=emb[:, 1])
     if emb.shape[1]== 3:
-        data['z'] = emb[:, 2]
-        scatter = px.scatter_3d
-    fig_kwargs = {k:k for k in data}
+        fig_kwargs['z'] = emb[:, 2]
+        scatter = go.Scatter3d
 
+    # Compute colors for displaying
+    colors = dict()
     dd_options = list()
     for k in all_labels:
         dd_options.append({'label': k, 'value': k})
-        data[k] = all_labels[k]['classes'][all_labels[k]['labels']]
+        classes = all_labels[k]['classes']
+        labels = all_labels[k]['labels']
+        color_map = sns.color_palette(n_colors=len(classes))
+        colors[k] = [color_map[label] for label in labels]
 
-    df = pd.DataFrame(data=data)
+
+####################################################
+#    # Plotly Express code that needs DataFrame
+#    scatter = px.scatter
+#    data = dict(x=emb[:, 0], y=emb[:, 1])
+#    if emb.shape[1]== 3:
+#        data['z'] = emb[:, 2]
+#        scatter = px.scatter_3d
+#    fig_kwargs = {k:k for k in data}
+#
+#    dd_options = list()
+#    for k in all_labels:
+#        dd_options.append({'label': k, 'value': k})
+#        data[k] = all_labels[k]['classes'][all_labels[k]['labels']]
+#
+#    df = pd.DataFrame(data=data)
+####################################################
+
 
     app = Dash(__name__)
 
@@ -136,6 +144,9 @@ def main(argv=None):
         hover_data = hoverData["points"][0]
         bbox = hover_data["bbox"]
         num = hover_data["pointNumber"]
+        hover_data['curveNumber'] # I think this value can be used to screen for the class that this point belongs to recalculate the num
+
+
 
         im_matrix = images[num]
         im_url = np_image_to_base64(im_matrix)
@@ -145,6 +156,7 @@ def main(argv=None):
                     src=im_url,
                     style={"width": "200px", 'display': 'block', 'margin': '0 auto'},
                 ),
+                #html.P(str(hoverData), style={'font-weight': 'bold'})
                 html.P(str(display_text[num]), style={'font-weight': 'bold'})
             ])
         ]
@@ -156,17 +168,18 @@ def main(argv=None):
         [Input('label-dropdown', 'value')]
     )
     def update_scatter_plot(selected_label):
-        fig = px.scatter_3d(df, color=selected_label, **fig_kwargs)
+        #fig = px.scatter_3d(df, color=selected_label, **fig_kwargs)  # Set marker size here
 
 
-        #fig = go.Figure(data=[scatter(
-        #    mode='markers',
-        #    marker=dict(
-        #        size=2,
-        #        color=colors[selected_label],
-        #    ),
-        #    **fig_kwargs
-        #)] )#, layout=layout)
+        """Create Figure with scatter plot"""
+        fig = go.Figure(data=[scatter(
+            mode='markers',
+            marker=dict(
+                size=2,
+                color=colors[selected_label],
+            ),
+            **fig_kwargs
+        )])
 
         fig.update_layout(margin=dict(l=0, r=0, b=0, t=0),
                           showlegend=True,
