@@ -49,6 +49,20 @@ def prob(string):
 current_selected_label = None
 
 def build_app(npz, subsample=None, stratify_label=None):
+    """Build a Dash app for interactive viewing of data
+
+    Args:
+        npz (str)               : A path to the NPZ file containing data needed for
+                                  building interactive scatter plot
+        subsample (float)       : the fraction of data to subsample for viewing. This
+                                  should be a floating point number between (0.0, 1.0).
+                                  By default, no data is subsampled.
+        stratify_label (str)    : the label to use for stratifying subsamples. This should
+                                  be one of the labels in NPZ files.
+
+    Returns:
+        app (dash.Dash)         : a Dash application
+    """
 
     images, emb, all_labels = load_data(npz)
 
