@@ -5,12 +5,15 @@ import pickle
 
 from dash import Dash, dcc, html, Input, Output, no_update, callback
 import plotly.graph_objects as go
+import plotly.express as px
 
 from PIL import Image
 
 import numpy as np
+import pandas as pd
 import seaborn as sns
 from sklearn.model_selection import train_test_split
+from skimage.transform import rescale
 
 # Contains 100 images for each digit from MNIST
 mnist_path = 'datasets/mini-mnist-1000.pickle'
@@ -56,6 +59,7 @@ def main(argv=None):
 
     images, emb, all_labels = load_data(args.npz)
 
+    # Subsample data
     if args.subsample:
         idx, _ = train_test_split(np.arange(len(images)), train_size=args.subsample, stratify=all_labels[args.label]['labels'])
         images = images[idx]
@@ -63,12 +67,9 @@ def main(argv=None):
         for k in all_labels:
             all_labels[k]['labels'] = all_labels[k]['labels'][idx]
 
-    classes = all_labels[args.label]['classes']
-    labels = all_labels[args.label]['labels']
-
-
+    # Compute display label
     display_text = list()
-    for i in range(len(labels)):
+    for i in range(len(emb)):
         tmp = list()
         for k in all_labels:
             c = all_labels[k]['classes'][all_labels[k]['labels'][i]]
@@ -76,51 +77,56 @@ def main(argv=None):
 
         display_text.append(" | ".join(tmp))
 
-    # Color for each label
-    color_map = sns.color_palette(n_colors=len(np.unique(labels)))
-    colors = [color_map[label] for label in labels]
 
+    #scatter = go.Scatter
+    #fig_kwargs = dict(x=emb[:, 0], y=emb[:, 1])
+    #if emb.shape[1]== 3:
+    #    fig_kwargs['z'] = emb[:, 2]
+    #    scatter = go.Scatter3d
 
-    layout = go.Layout(
-        margin={'l': 0, 'r': 0, 'b': 0, 't': 0},
-        autosize=True,
-        height=700
-    )
+    #colors = dict()
+    #dd_options = list()
+    #for k in all_labels:
+    #    dd_options.append({'label': k, 'value': k})
+    #    classes = all_labels[k]['classes']
+    #    labels = all_labels[k]['labels']
+    #    color_map = sns.color_palette(n_colors=len(classes))
+    #    colors[k] = [color_map[label] for label in labels]
 
-    scatter = go.Scatter
-    kwargs = dict(x=emb[:, 0], y=emb[:, 1])
+    scatter = px.scatter
+    data = dict(x=emb[:, 0], y=emb[:, 1])
     if emb.shape[1]== 3:
-        kwargs['z'] = emb[:, 2]
-        scatter = go.Scatter3d
-    fig = go.Figure(data=[scatter(
-        mode='markers',
-        marker=dict(
-            size=2,
-            color=colors,
-        ),
-        **kwargs
-    )], layout=layout)
+        data['z'] = emb[:, 2]
+        scatter = px.scatter_3d
+    fig_kwargs = {k:k for k in data}
 
-    fig.update_traces(
-        hoverinfo="none",
-        hovertemplate=None,
-    )
+    dd_options = list()
+    for k in all_labels:
+        dd_options.append({'label': k, 'value': k})
+        data[k] = all_labels[k]['classes'][all_labels[k]['labels']]
+
+    df = pd.DataFrame(data=data)
 
     app = Dash(__name__)
 
     app.layout = html.Div(
         className="container",
         children=[
-            dcc.Graph(id="graph-5", figure=fig, clear_on_unhover=True),
-            dcc.Tooltip(id="graph-tooltip-5", direction='bottom'),
+            dcc.Dropdown(
+                id='label-dropdown',
+                options=dd_options,
+                value='ht'
+            ),
+            dcc.Graph(id="scatter-plot", clear_on_unhover=True),
+            dcc.Tooltip(id="scatter-tooltip", direction='bottom'),
         ],
     )
 
     @callback(
-        Output("graph-tooltip-5", "show"),
-        Output("graph-tooltip-5", "bbox"),
-        Output("graph-tooltip-5", "children"),
-        Input("graph-5", "hoverData"),
+        Output("scatter-tooltip", "show"),
+        Output("scatter-tooltip", "bbox"),
+        Output("scatter-tooltip", "children"),
+        Input("scatter-plot", "hoverData"),
     )
     def display_hover(hoverData):
         if hoverData is None:
@@ -137,14 +143,40 @@ def main(argv=None):
             html.Div([
                 html.Img(
                     src=im_url,
-                    style={"width": "50px", 'display': 'block', 'margin': '0 auto'},
+                    style={"width": "200px", 'display': 'block', 'margin': '0 auto'},
                 ),
                 html.P(str(display_text[num]), style={'font-weight': 'bold'})
-                #html.P("Label: " + str(classes[labels[num]]), style={'font-weight': 'bold'})
             ])
         ]
 
         return True, bbox, children
+
+    @app.callback(
+        Output('scatter-plot', 'figure'),
+        [Input('label-dropdown', 'value')]
+    )
+    def update_scatter_plot(selected_label):
+        fig = px.scatter_3d(df, color=selected_label, **fig_kwargs)
+
+
+        #fig = go.Figure(data=[scatter(
+        #    mode='markers',
+        #    marker=dict(
+        #        size=2,
+        #        color=colors[selected_label],
+        #    ),
+        #    **fig_kwargs
+        #)] )#, layout=layout)
+
+        fig.update_layout(margin=dict(l=0, r=0, b=0, t=0),
+                          showlegend=True,
+                          autosize=True, height=700)
+        fig.update_traces(
+            hoverinfo="none",
+            hovertemplate=None,
+        )
+        return fig
+
 
     app.run(debug=True)
 
