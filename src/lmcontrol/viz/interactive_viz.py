@@ -5,7 +5,6 @@ import pickle
 
 from dash import Dash, dcc, html, Input, Output, no_update, callback
 import plotly.graph_objects as go
-import plotly.express as px
 
 from PIL import Image
 
@@ -13,7 +12,6 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from sklearn.model_selection import train_test_split
-from skimage.transform import rescale
 
 # Contains 100 images for each digit from MNIST
 mnist_path = 'datasets/mini-mnist-1000.pickle'
