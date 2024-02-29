@@ -45,7 +45,7 @@ def main(argv=None):
     parser.add_argument("npzs", nargs='+', help='the NPZ files produced from the crop command')
     parser.add_argument("-M", "--metric", default=None,
                         help="the distance metric to use with UMAP. Default is euclidean for images, jaccard for masks")
-    parser.add_argument("-2", "--two_dim", action='store_true', default=False,
+    parser.add_argument("-2", "--two-dim", action='store_true', default=False,
                         help='compute 2-dimensional embeddings. 3-dimensions are computed by default')
     parser.add_argument("-m", "--masks", action='store_true', default=False,
                         help='compute embeddings from masks. segmented images are used by default')
