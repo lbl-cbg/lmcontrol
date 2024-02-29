@@ -111,7 +111,7 @@ def build_app(npz, subsample=None, stratify_label=None):
     dd_options = [{'label': k, 'value': k} for k in all_labels]
 
     # Set up our Dash application
-    app = Dash(__name__)
+    app = Dash("LMControl Viz")
     app.layout = html.Div(
         className="container",
         children=[
@@ -218,12 +218,14 @@ def main(argv=None):
     parser.add_argument('npz', help='the NumPy file archive containing data for plotting')
     parser.add_argument('-s', '--subsample', help='the fraction to subsample data points to', type=float, default=None)
     parser.add_argument('-l', '--label', help='the label to use for stratifying subsample', default='time')
+    parser.add_argument('-P', '--port', help='the port to run the application on', type=int, default=8050)
+    parser.add_argument('-p', '--prod', help='do not run Dash app in debug mode', action='store_true', default=False)
 
     args = parser.parse_args(argv)
 
     app = build_app(args.npz, subsample=args.subsample, stratify_label=args.label)
 
-    app.run(debug=True)
+    app.run(debug=not args.prod, port=args.port)
 
 
 if __name__ == "__main__":

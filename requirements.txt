@@ -6,5 +6,7 @@ tqdm
 umap-learn
 plotly
 dash
-matplotlib
 seaborn
+Pillow
+pandas
+numba

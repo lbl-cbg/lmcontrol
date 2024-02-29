@@ -26,15 +26,18 @@ keywords = [
 ]
 
 dependencies = [
-    "matplotlib",
-    "seaborn",
-    "plotly", 
     "numpy",
-    "scipy",
-    "scikit-learn",
     "scikit-image",
+    "scikit-learn",
+    "scipy",
+    "tqdm",
+    "umap-learn",
+    "plotly",
     "dash",
-    "umap-learn"
+    "seaborn",
+    "Pillow",
+    "pandas",
+    "numba",
 ]
 
 dynamic = ["version"]

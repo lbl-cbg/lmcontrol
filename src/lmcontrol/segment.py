@@ -295,7 +295,7 @@ def main(argv=None):
 
     # save cropped and rotate
     logger.info(f"Saving all cropped images to {npz_out}")
-    write_npz(npz_out, seg_images, seg_masks, paths, **args.metadata):
+    write_npz(npz_out, seg_images, seg_masks, paths, **args.metadata)
 
 
 if __name__ == "__main__":
