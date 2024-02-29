@@ -30,7 +30,7 @@ pip install .
 ## Self-supervised Learning
 
 - `lmcontrol train-byol` - Train a [BYOL](https://arxiv.org/abs/2006.07733) model
-- `lmcontrol infer-byol` - Create embeddings with a trained [BYOL](https://arxiv.org/abs/2006.07733) model
+- `lmcontrol infer-byol` - Create embeddings with [BYOL](https://arxiv.org/abs/2006.07733)-trained model
 
 ## notebooks
 
