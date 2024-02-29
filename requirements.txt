@@ -8,3 +8,6 @@ plotly
 dash
 matplotlib
 seaborn
+torch
+lightning
+lightly

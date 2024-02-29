@@ -34,7 +34,10 @@ dependencies = [
     "scikit-learn",
     "scikit-image",
     "dash",
-    "umap-learn"
+    "umap-learn",
+    "torch",
+    "lightning",
+    "lightly",
 ]
 
 dynamic = ["version"]
