@@ -19,8 +19,10 @@ def main():
             'crop': Command('segment.main', 'Crop light microscopy images to bounding box around single cell'),
             'prep-viz': Command('viz.make_package.main', 'Prepare package for visualizing image embeddings'),
             'emb-viz': Command('viz.interactive_viz.main', 'Interactive viewer of image embeddings'),
+        },
+        'Self-supervised Learning': {
             'train-byol': Command('nn.run_byol.main', 'Train BYOL model'),
-            'infer-byol': Command('nn.run_byol.predict', 'Run inference BYOL backbone'),
+            'infer-byol': Command('nn.run_byol.predict', 'Run with inference BYOL backbone'),
         },
     }
     import sys
