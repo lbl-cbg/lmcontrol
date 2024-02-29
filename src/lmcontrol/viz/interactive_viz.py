@@ -2,6 +2,7 @@ import argparse
 import io
 import base64
 import pickle
+import json
 
 from dash import Dash, dcc, html, Input, Output, no_update, callback
 import plotly.graph_objects as go
@@ -46,7 +47,6 @@ def prob(string):
     if ret > 1.0 or ret < 0.0:
         raise argparse.ArgumentTypeError()
 
-current_selected_label = None
 
 def build_app(npz, subsample=None, stratify_label=None):
     """Build a Dash app for interactive viewing of data
@@ -122,8 +122,24 @@ def build_app(npz, subsample=None, stratify_label=None):
             ),
             dcc.Graph(id="scatter-plot", clear_on_unhover=True),
             dcc.Tooltip(id="scatter-tooltip", direction='bottom'),
+            html.Div([
+                dcc.Markdown("""
+                    **Click Data**
+
+                    Click on points in the graph.
+                """),
+                html.Pre(id='click-data'),
+            ], className='three columns'),
         ],
     )
+
+    @callback(
+        Output('click-data', 'children'),
+        Input('scatter-plot', 'clickData'))
+    def display_hover_data(clickData):
+        s = json.dumps(clickData, indent=2)
+        print(s)
+        return s
 
     # Make a function of updating the hover
     @callback(
@@ -131,8 +147,9 @@ def build_app(npz, subsample=None, stratify_label=None):
         Output("scatter-tooltip", "bbox"),
         Output("scatter-tooltip", "children"),
         Input("scatter-plot", "hoverData"),
+        Input("label-dropdown", "value"),
     )
-    def display_hover(hoverData):
+    def display_hover(hoverData, selected_label):
         """Update data displayed when hovering over points"""
         if hoverData is None:
             return False, no_update, no_update
@@ -145,8 +162,8 @@ def build_app(npz, subsample=None, stratify_label=None):
         # added to the Figure. For example, curveNumber=4 means we need to get
         # data for the fifth Trace that was added to the Figure.
         class_id = hover_data['curveNumber']
-        class_val = classes[current_selected_label][class_id]
-        mask = df[current_selected_label] == class_val
+        class_val = classes[selected_label][class_id]
+        mask = df[selected_label] == class_val
         pt_series = df[['images', 'text']][mask].iloc[num]
         im_url = pt_series['images']
         disp_txt = pt_series['text']
@@ -163,6 +180,7 @@ def build_app(npz, subsample=None, stratify_label=None):
 
         return True, bbox, children
 
+
     # Make a function for updating the display when we toggle label
     @app.callback(
         Output('scatter-plot', 'figure'),
@@ -170,27 +188,23 @@ def build_app(npz, subsample=None, stratify_label=None):
     )
     def update_scatter_plot(selected_label):
         """Create Figure with scatter plot"""
-
-        # we need to maintain a global state so display_hover
-        # knows what label we are currently using
-        global current_selected_label
-        current_selected_label = selected_label
-
         fig = go.Figure()
+
         # add a Trace object for each class label. The order in which
         # we iterate over these values corresponds to curveNum included
         # in hoverData passed into display_hover
         for cls in classes[selected_label]:
             mask = df[selected_label] == cls
             fig_kwargs = {var: df[var][mask] for var in fig_vars}
-            fig.add_trace(scatter(
+            trace = scatter(
                 name=all_labels[selected_label]['classes'][cls],
                 mode='markers',
                 marker=dict(
                     size=2,
                 ),
                 **fig_kwargs
-            ))
+            )
+            fig.add_trace(trace)
 
         # Options for rendering the legend
         legend=dict(
