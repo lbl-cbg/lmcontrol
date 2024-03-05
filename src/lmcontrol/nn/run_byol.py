@@ -44,8 +44,8 @@ def main(argv=None):
 
     train_tfm = BYOLTransform()
     val_tfm = BYOLTransform(
-            transform1=get_transforms('float', 'rotate', 'crop', 'hflip', 'vflip', 'rgb'),
-            transform2=get_transforms('float', 'crop', 'rgb'),
+            transform1=get_transforms('float', 'norm', 'rotate', 'crop', 'hflip', 'vflip', 'rgb'),
+            transform2=get_transforms('float', 'norm', 'crop', 'rgb'),
             )
 
     logger.info(f"Loading training data: {len(train_files)} files")
