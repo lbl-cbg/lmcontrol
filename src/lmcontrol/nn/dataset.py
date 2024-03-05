@@ -38,6 +38,9 @@ class GaussianNoise(T._transform.Transform):
 class Norm(T._transform.Transform):
     """Independently normalize images"""
 
+    def __init__(self, scale=True):
+        self.scale = scale
+
     @staticmethod
     def T(t):
         if t.ndim == 2:
@@ -48,7 +51,11 @@ class Norm(T._transform.Transform):
             return t.permute(*torch.arange(t.ndim - 1, -1, -1))
 
     def __call__(self, sample: torch.Tensor) -> torch.Tensor:
-        return self.T(self.T(sample) - self.T(sample.mean(dim=(-2, -1))))
+        ret = self.T(self.T(sample) - self.T(sample.mean(dim=(-2, -1))))
+        if self.scale:
+            ret = self.T(self.T(ret) / self.T(torch.amax(torch.abs(ret), dim=(-2, -1))))
+        return ret
+
 
 
 class LMDataset(Dataset):
