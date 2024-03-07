@@ -66,14 +66,15 @@ def main(argv=None):
     if len(args.npzs) == 1 and 'predictions' in np.load(args.npzs[0]).files:
         npz = np.load(args.npzs[0])
         data = npz['predictions']
-        labels = dict()
+        kwargs = dict()
         for k in npz.files:
             if '_labels' in k or '_classes' in k:
-                labels[k] = npz[k]
+                kwargs[k] = npz[k]
         images = npz['images']
+        kwargs['predictions'] = data
     else:
         masks, images, paths, metadata = load_npzs(args.npzs, logger)
-        labels = prepare_labels(metadata)
+        kwargs = prepare_labels(metadata)
         data = images
         if args.masks:
             data = masks
@@ -83,7 +84,7 @@ def main(argv=None):
     emb = compute_embedding(data, logger, metric=metric, two_d=args.two_dim, center_images=args.center)
 
     logger.info(f"Saving embeddings, images, and metadata to {args.out_npz}", )
-    np.savez(args.out_npz, images=images, embedding=emb, **labels)
+    np.savez(args.out_npz, images=images, embedding=emb, **kwargs)
 
 
 if __name__ == "__main__":

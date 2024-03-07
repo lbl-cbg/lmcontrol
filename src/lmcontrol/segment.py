@@ -160,7 +160,7 @@ def trim_box(mask, img, size=None, pad=True):
     return ret
 
 
-def crop_image(img, size=None):
+def crop_image(img, size=None, return_mask=False):
     """
     Crop image around the cell imaged in *img*.
 
@@ -171,6 +171,8 @@ def crop_image(img, size=None):
     """
     mask = outlier_cluster(img)
     new_img = trim_box(mask, img, size=size)
+    if return_mask:
+        return new_img, mask
     return new_img
 
 

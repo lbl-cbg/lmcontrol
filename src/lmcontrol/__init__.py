@@ -21,8 +21,8 @@ def main():
             'emb-viz': Command('viz.interactive_viz.main', 'Interactive viewer of image embeddings'),
         },
         'Self-supervised Learning': {
-            'train-byol': Command('nn.run_byol.main', 'Train BYOL model'),
-            'infer-byol': Command('nn.run_byol.predict', 'Run with inference BYOL backbone'),
+            'train-byol': Command('nn.byol.train', 'Train BYOL model'),
+            'infer-byol': Command('nn.byol.predict', 'Run with inference BYOL backbone'),
         },
     }
     import sys
