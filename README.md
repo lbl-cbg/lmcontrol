@@ -18,12 +18,19 @@ pip install .
 
 # Commands
 
+## Segmentation
+
 - `lmcontrol crop` - Crop light microscopy images to bounding box around single 
                      cell.
 - `lmcontrol prep-viz` - Prepare package for running interactive visualizer. 
                          See `emb-viz` command for more details.
 - `lmcontrol emb-viz` - Launch interactive visualizer for exploring segmented and 
                         cropped images.
+
+## Self-supervised Learning
+
+- `lmcontrol train-byol` - Train a model with [BYOL](https://arxiv.org/abs/2006.07733)
+- `lmcontrol infer-byol` - Create embeddings with [BYOL](https://arxiv.org/abs/2006.07733)-trained model
 
 ## notebooks
 

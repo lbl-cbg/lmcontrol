@@ -27,13 +27,16 @@ keywords = [
 
 dependencies = [
     "numpy",
+    "scipy",
     "scikit-image",
     "scikit-learn",
-    "scipy",
     "tqdm",
-    "umap-learn",
     "plotly",
     "dash",
+    "umap-learn",
+    "torch",
+    "lightning",
+    "lightly",
     "seaborn",
     "Pillow",
     "pandas",

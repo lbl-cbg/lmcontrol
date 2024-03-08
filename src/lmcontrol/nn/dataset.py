@@ -5,7 +5,7 @@ from torch.utils.data import Dataset
 import torchvision.transforms.v2 as T
 
 
-from ..data_utils import load_npzs
+from ..data_utils import encode_labels, load_npzs
 from ..utils import get_logger
 
 
@@ -27,12 +27,35 @@ class GaussianNoise(T._transform.Transform):
             snr = self.sigma
             if isinstance(self.sigma, tuple):
                 snr = torch.randint(low=self.sigma[0], high=self.sigma[1], size=(1,))
-            sigma = mu / snr
+            sigma = mu.abs() / snr
             noise = torch.normal(torch.zeros(sample.shape), sigma)
             if sample.dtype == torch.uint8:
                 noise = noise.to(torch.uint8)
             return sample + noise
         return sample
+
+
+class Norm(T._transform.Transform):
+    """Independently normalize images"""
+
+    def __init__(self, scale=True):
+        self.scale = scale
+
+    @staticmethod
+    def T(t):
+        if t.ndim == 2:
+            return t.T
+        elif t.ndim == 1 or t.ndim == 0:
+            return t
+        else:
+            return t.permute(*torch.arange(t.ndim - 1, -1, -1))
+
+    def __call__(self, sample: torch.Tensor) -> torch.Tensor:
+        ret = self.T(self.T(sample) - self.T(sample.mean(dim=(-2, -1))))
+        if self.scale:
+            ret = self.T(self.T(ret) / self.T(torch.amax(torch.abs(ret), dim=(-2, -1))))
+        return ret
+
 
 
 class LMDataset(Dataset):
@@ -42,6 +65,10 @@ class LMDataset(Dataset):
         Args:
             npzs (array-like)       : A list or tuple of paths to NPZ files containing cropped images
         """
+        if not isinstance(npzs, (list, tuple, np.ndarray, torch.Tensor)):
+            raise ValueError(f"Got unexpected type ({type(npzs)}) for argument 'npzs'. Must be an array-like")
+        elif len(npzs) == 0:
+            raise ValueError("Got empty array-like for argument 'npzs'")
         logger = logger or get_logger('warning')
         masks, images, paths, metadata = load_npzs(npzs, logger)
         if use_masks:
@@ -52,11 +79,26 @@ class LMDataset(Dataset):
         self.paths = tuple(paths)
         self.transform = None
 
+        self.labels = None
+        self.label_classes = None
+        self.label_types = None
+        if return_labels:
+            tmp = list()
+            self.label_classes = list()
+            self.label_types = list()
+            for k in metadata:
+                self.label_types.append(k)
+                labels, classes = encode_labels(metadata[k])
+                self.label_classes.append(classes)
+                tmp.append(labels)
+            self.labels = torch.from_numpy(np.stack(tmp, axis=1))
+
     def __getitem__(self, i):
         ret = self.data[i]
         if self.transform is not None:
             ret = self.transform(ret)
-        return ret, -1
+        labels = -1 if self.labels is None else self.labels[i]
+        return ret, labels
 
     def __len__(self):
         return len(self.data)
@@ -75,6 +117,7 @@ TRANSFORMS = {
         'noise': GaussianNoise(sigma=(10, 12)),
         'rgb': T.Lambda(lambda x: x.repeat(3, 1, 1) if x.ndim == 3 else x.repeat(1, 3, 1, 1)),
         'float': T.Lambda(lambda x: x.to(torch.float32)),
+        'norm': Norm(),
 }
 
 
@@ -82,6 +125,8 @@ def get_transforms(*transforms):
     """Return a transforms appropriate for Ambr light microscopy data
 
     The following transforms and their respective keys are:
+        norm:       Normalize the image by subtracting the mean pixel value from
+                    image
         blur:       A Gaussian Blur
         rotate:     Random rotation of up to 180 degrees in either direction
         crop:       Center crop images to 64x64 pixels
@@ -94,7 +139,7 @@ def get_transforms(*transforms):
 
     Args:
         transforms: the list of transforms to get. Valid options are 'blur', 'rotate', 'crop',
-                    'hflip', 'vflip', 'noise', 'rgb', 'float'.
+                    'hflip', 'vflip', 'noise', 'rgb', 'float', 'norm'
     Returns:
         a single transform or a Compose object pipeline with transforms in the order they
         are given. If no transforms are specified, the identity transform will be returned

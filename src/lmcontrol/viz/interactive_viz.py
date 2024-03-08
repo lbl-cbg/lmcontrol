@@ -74,6 +74,7 @@ def build_app(npz, subsample=None, stratify_label=None, **addl_labels):
         all_labels[k]['classes'] = list(map(str, enc.classes_))
 
 
+    idx = np.arange(len(images))
     # Subsample data
     if subsample is not None:
         if not isinstance(subsample, float) or not (subsample > 0.0 and subsample < 1.0):
@@ -94,7 +95,7 @@ def build_app(npz, subsample=None, stratify_label=None, **addl_labels):
         for k in all_labels:
             c = all_labels[k]['classes'][all_labels[k]['labels'][i]]
             tmp.append(f"{k}: {c}")
-        display_text.append(" | ".join(tmp))
+        display_text.append(f"idx: {idx[i]}\n" + " | ".join(tmp))
 
     # Set up data for graph object
     scatter = go.Scatter
@@ -159,14 +160,18 @@ def build_app(npz, subsample=None, stratify_label=None, **addl_labels):
         im_url = pt_series['images']
         disp_txt = pt_series['text']
 
-        children = [
-            html.Div([
+        components = [
                 html.Img(
                     src=im_url,
                     style={"width": "200px", 'display': 'block', 'margin': '0 auto'},
                 ),
-                html.P(str(disp_txt), style={'font-weight': 'bold'})
-            ])
+            ]
+
+        for c in str(disp_txt).split("\n"):
+            components.append(html.P(c, style={'font-weight': 'bold'}))
+
+        children = [
+            html.Div(components)
         ]
 
         return True, bbox, children

@@ -12,10 +12,8 @@ with warnings.catch_warnings():
     warnings.simplefilter('ignore', category=NumbaPendingDeprecationWarning)
     from umap import UMAP
 
-from sklearn.preprocessing import LabelEncoder
-
 from ..utils import get_logger
-from ..data_utils import load_npzs
+from ..data_utils import encode_labels, load_npzs
 
 
 def compute_embedding(data, logger, metric='euclidean', two_d=False, center_images=False):
@@ -33,10 +31,7 @@ def prepare_labels(metadata):
     """Encode labels and package into dictionary for easy saving"""
     ret = dict()
     for k in metadata:
-        enc = LabelEncoder().fit(metadata[k])
-        ret[k] = dict()
-        ret[k + '_classes'] = enc.classes_
-        ret[k + '_labels'] = enc.transform(metadata[k])
+        ret[k + '_labels'], ret[k + '_classes'] = encode_labels(metadata[k])
     return ret
 
 
@@ -64,21 +59,32 @@ def main(argv=None):
     if args.verbose:
         logger.setLevel(logging.DEBUG)
 
-    masks, images, paths, metadata = load_npzs(args.npzs, logger)
+    if args.out_npz in args.npzs:
+        print(f"Output path {args.out_npz} found in input NPZs. Please provide another output path", file=sys.stderr)
 
-    labels = prepare_labels(metadata)
-
-    dat = images
     metric = 'euclidean'
-    if args.masks:
-        dat = masks
-        metric = 'jaccard'
-    metric = args.metric or metric
+    if len(args.npzs) == 1 and 'predictions' in np.load(args.npzs[0]).files:
+        npz = np.load(args.npzs[0])
+        data = npz['predictions']
+        kwargs = dict()
+        for k in npz.files:
+            if '_labels' in k or '_classes' in k:
+                kwargs[k] = npz[k]
+        images = npz['images']
+        kwargs['predictions'] = data
+    else:
+        masks, images, paths, metadata = load_npzs(args.npzs, logger)
+        kwargs = prepare_labels(metadata)
+        data = images
+        if args.masks:
+            data = masks
+            metric = 'jaccard'
+        metric = args.metric or metric
 
-    emb = compute_embedding(dat, logger, metric=metric, two_d=args.two_dim, center_images=args.center)
+    emb = compute_embedding(data, logger, metric=metric, two_d=args.two_dim, center_images=args.center)
 
     logger.info(f"Saving embeddings, images, and metadata to {args.out_npz}", )
-    np.savez(args.out_npz, images=images, embedding=emb, **labels)
+    np.savez(args.out_npz, images=images, embedding=emb, **kwargs)
 
 
 if __name__ == "__main__":
