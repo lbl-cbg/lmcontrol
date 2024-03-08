@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
 
 # Contains 100 images for each digit from MNIST
 mnist_path = 'datasets/mini-mnist-1000.pickle'
@@ -48,7 +49,7 @@ def prob(string):
 
 current_selected_label = None
 
-def build_app(npz, subsample=None, stratify_label=None):
+def build_app(npz, subsample=None, stratify_label=None, **addl_labels):
     """Build a Dash app for interactive viewing of data
 
     Args:
@@ -65,6 +66,13 @@ def build_app(npz, subsample=None, stratify_label=None):
     """
 
     images, emb, all_labels = load_data(npz)
+
+    for k in addl_labels:
+        all_labels[k] = dict()
+        enc = LabelEncoder()
+        all_labels[k]['labels'] = enc.fit_transform(addl_labels[k])
+        all_labels[k]['classes'] = list(map(str, enc.classes_))
+
 
     idx = np.arange(len(images))
     # Subsample data
