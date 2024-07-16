@@ -91,6 +91,38 @@ def get_npzs(timepoints, hts):
             ret.extend(glob.glob(f"S{tp}/*HT{ht}/*.npz"))
     return ret
 
+class MyDataset(Dataset):
+    def __init__(self, file_list, transform=None):
+        self.file_list = file_list
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.file_list)
+
+    def __getitem__(self, idx):
+        if torch.is_tensor(idx):
+            idx = idx.tolist()
+
+        img_name = self.file_list[idx]
+        label = self._get_label(img_name)
+
+        if self.transform:
+            image = self.transform(image)
+
+        return image, label
+
+    def _get_label(self, file_path): #finds the label associated 
+
+        label = file_path.split('_')[-2]  
+        return label
+
+
+def get_npzs(timepoints, hts):
+    ret = []
+    for tp in timepoints:
+        for ht in hts:
+            ret.extend(glob.glob(f"S{tp}_H{ht}_*/**/*.npz", recursive=True))
+    return ret
 
 def train(argv=None):
     parser = argparse.ArgumentParser()
