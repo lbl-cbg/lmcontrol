@@ -1,0 +1,2 @@
+[console_scripts]
+lmcontrol = lmcontrol:main
