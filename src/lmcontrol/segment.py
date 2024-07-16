@@ -12,7 +12,7 @@ from skimage.morphology import closing
 from tqdm import tqdm
 
 from .utils import get_logger
-
+from .data_utils import write_npz
 
 @njit
 def _raw_outlier_mask(img):
