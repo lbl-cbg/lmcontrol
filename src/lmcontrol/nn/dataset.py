@@ -8,6 +8,9 @@ import torchvision.transforms.v2 as T
 from ..data_utils import encode_labels, load_npzs
 from ..utils import get_logger
 
+import torch
+from torch.utils.data import Dataset
+import glob
 
 class GaussianNoise(T._transform.Transform):
     """Applies random Gaussian noise to a tensor.
@@ -60,7 +63,7 @@ class Norm(T._transform.Transform):
 
 class LMDataset(Dataset):
 
-    def __init__(self, npzs, use_masks=False, return_labels=False, logger=None):
+    def __init__(self, npzs, use_masks=False, return_labels=False, logger=None, transform=None, label_types=None):
         """
         Args:
             npzs (array-like)       : A list or tuple of paths to NPZ files containing cropped images
@@ -77,7 +80,10 @@ class LMDataset(Dataset):
             self.data = images
         self.data = torch.from_numpy(self.data)[:, None, :, :]
         self.paths = tuple(paths)
-        self.transform = None
+        self.transform = transform
+
+        if not isinstance(label_types, (tuple, list)):
+            label_types = [label_types]
 
         self.labels = None
         self.label_classes = None
@@ -87,6 +93,8 @@ class LMDataset(Dataset):
             self.label_classes = list()
             self.label_types = list()
             for k in metadata:
+                if k not in label_types:
+                    continue
                 self.label_types.append(k)
                 labels, classes = encode_labels(metadata[k])
                 self.label_classes.append(classes)
@@ -106,6 +114,14 @@ class LMDataset(Dataset):
     @staticmethod
     def index_to_filename(dataset, i):
         return dataset.paths[i]
+
+
+def extract_labels_from_filename(filename):
+    """Extract labels from filename in the format Sx_HTY_randomtext.npz"""
+    parts = filename.split('/')[-1].split('_')
+    x_label = parts[0][1:]  # Extract X from SX
+    y_label = parts[1][2:]  # Extract Y from HTY
+    return x_label, y_label
 
 
 TRANSFORMS = {
