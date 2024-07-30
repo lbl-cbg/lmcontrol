@@ -23,6 +23,12 @@ def main():
         'Self-supervised Learning': {
             'train-byol': Command('nn.byol.train', 'Train BYOL model'),
             'infer-byol': Command('nn.byol.predict', 'Run with inference BYOL backbone'),
+            
+        },
+        'Supervised Learning':{
+            'train-clf': Command('nn.clf.train', 'Train with classifier'),
+            'predict-clf': Command( 'nn.clf.predict', 'Predict with classifier'),
+
         },
     }
     import sys
