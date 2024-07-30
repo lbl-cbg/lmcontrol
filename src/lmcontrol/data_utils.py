@@ -25,7 +25,7 @@ def load_npzs(npzs, logger):
         # read metadata found in NPZ files
         md_keys = set(npz.keys()) - {'paths', 'masks', 'images'}
         logger.debug(f"Found the following keys in {npz_path}: {' '.join(sorted(md_keys))}")
-        for k in md_keys:
+        for k in sorted(md_keys):
             v = metadata.setdefault(k, list())
             v.extend([str(npz[k])] * len(npz['masks']))
 
