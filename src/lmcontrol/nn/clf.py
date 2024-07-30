@@ -153,10 +153,10 @@ def train(argv=None):
 
 
     trainer = L.Trainer(
-        max_epochs=10,                       ##CHANGE THIS TO 100
+        max_epochs=args.epochs,                       ##CHANGE THIS TO 100
         devices=1,
         accelerator=accelerator,
-        #callbacks=[early_stopping],  #UNCOMMENT WHEN DONE
+        callbacks=[early_stopping],  #UNCOMMENT WHEN DONE
         logger=wandb_logger  
     )
     
