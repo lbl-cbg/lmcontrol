@@ -3,7 +3,7 @@ import io
 import base64
 import pickle
 
-from dash import Dash, dcc, html, Input, Output, no_update, callback
+from dash import Dash, dcc, html, Input, Output, no_update, callback, State
 import plotly.graph_objects as go
 
 from PIL import Image
@@ -179,9 +179,10 @@ def build_app(npz, subsample=None, stratify_label=None, **addl_labels):
     # Make a function for updating the display when we toggle label
     @app.callback(
         Output('scatter-plot', 'figure'),
-        [Input('label-dropdown', 'value')]
+        [Input('label-dropdown', 'value')],
+        [State('scatter-plot', 'relayoutData')]
     )
-    def update_scatter_plot(selected_label):
+    def update_scatter_plot(selected_label, relayout_data):
         """Create Figure with scatter plot"""
 
         # we need to maintain a global state so display_hover
@@ -208,15 +209,19 @@ def build_app(npz, subsample=None, stratify_label=None, **addl_labels):
         # Options for rendering the legend
         legend=dict(
             x=0,
-            y=1,
+            y=0,
             bordercolor="Black",
             borderwidth=2,
             itemsizing='constant',
+            xanchor='left',
+            yanchor='bottom'
         )
-
+        camera = None
+        if relayout_data:
+            camera = relayout_data.get('scene.camera')
         fig.update_layout(margin=dict(l=0, r=0, b=0, t=0),
-                          showlegend=True, legend=legend,
-                          autosize=True, height=700)
+                              showlegend=True, legend=legend,
+                              autosize=True, height=700, scene_camera=camera)
         fig.update_traces(
             hoverinfo="none",
             hovertemplate=None,
