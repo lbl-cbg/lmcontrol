@@ -1,3 +1,5 @@
+
+
 import numpy as np
 from lightly.data import LightlyDataset
 import torch
@@ -63,7 +65,7 @@ class Norm(T._transform.Transform):
 
 class LMDataset(Dataset):
 
-    def __init__(self, npzs, use_masks=False, return_labels=False, logger=None, transform=None, label_types=None):
+    def __init__(self, npzs, use_masks=False, return_labels=False, logger=None, transform=None, label_types=None,n=None):
         """
         Args:
             npzs (array-like)       : A list or tuple of paths to NPZ files containing cropped images
@@ -73,7 +75,7 @@ class LMDataset(Dataset):
         elif len(npzs) == 0:
             raise ValueError("Got empty array-like for argument 'npzs'")
         logger = logger or get_logger('warning')
-        masks, images, paths, metadata = load_npzs(npzs, logger)
+        masks, images, paths, metadata = load_npzs(npzs, logger,n,label_types)
         if use_masks:
             self.data = masks
         else:
