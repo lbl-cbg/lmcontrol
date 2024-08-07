@@ -1,3 +1,4 @@
+
 import argparse
 import logging
 import sys
@@ -37,7 +38,7 @@ def prepare_labels(metadata):
 
 def main(argv=None):
     """
-    Make an NPZ archive with data necesary for interactive visualization of images
+    Make an NPZ archive with data necessary for interactive visualization of images
     """
 
     parser = argparse.ArgumentParser()
@@ -72,6 +73,13 @@ def main(argv=None):
                 kwargs[k] = npz[k]
         images = npz['images']
         kwargs['predictions'] = data
+        if 'true_labels' in npz.files and 'pred_labels' in npz.files:
+            kwargs['true_labels'] = npz['true_labels']
+            kwargs['Prediction_labels'] = npz['pred_labels']
+            correct_incorrect = kwargs['true_labels'] == kwargs['Prediction_labels']
+            kwargs['Prediction_classes'] = ['Incorrect:0', 'Correct:1']
+            kwargs['Prediction_labels'] = correct_incorrect.astype(int)
+            kwargs['Prediction_labels_readable_labels'] = ['Correct' if label == 1 else 'Incorrect' for label in correct_incorrect]
     else:
         masks, images, paths, metadata = load_npzs(args.npzs, logger)
         kwargs = prepare_labels(metadata)
@@ -89,3 +97,4 @@ def main(argv=None):
 
 if __name__ == "__main__":
     main()
+
