@@ -57,6 +57,7 @@ class BYOL(L.LightningModule):
         deactivate_requires_grad(self.projection_head_momentum)
 
         self.criterion = NegativeCosineSimilarity()
+        self.save_hyperparameters()
 
     def forward(self, x):
         y = self.backbone(x).flatten(start_dim=1)
@@ -93,7 +94,7 @@ class BYOL(L.LightningModule):
         self.log(self.val_metric, loss, batch_size=x0.size(0))
         return loss
 
-    def predict_step(self, batch, batch_idx, dataloader_idx=0):
+    def predict_step(self, batch, batch_idx, dataloader_idx=0):  #.predict function automatically call this
         x = batch[0]
         return self.backbone(x).flatten(start_dim=1)
 
@@ -188,6 +189,8 @@ def train(argv=None):
                         callbacks=[EarlyStopping(monitor=model.val_metric, min_delta=0.001, patience=3, mode="min")])
 
     trainer.fit(model=model, train_dataloaders=train_dl, val_dataloaders=val_dl)
+
+
 
 def predict(argv=None):
 
