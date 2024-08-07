@@ -1,3 +1,4 @@
+
 import argparse
 import glob
 import lightning as L
@@ -98,13 +99,16 @@ def get_transform():
 def train(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("experiment", type=str, help="the experiment name")
-    parser.add_argument('labels', type=str, nargs='+', help="the label to train with")
+    parser.add_argument('labels', type=str, help="the label to train with") #Let us currently only work with single label. We will add other labels in future (Andrew)
     parser.add_argument("--training", type=str, nargs='+', required=True, help="directories containing training data")
     parser.add_argument("--validation", type=str, nargs='+', required=True, help="directories containing validation data")
     parser.add_argument("-c","--checkpoint", type=str, help="path to the model checkpoint file to use for inference")    
     parser.add_argument("-e", "--epochs", type=int, help="the number of epochs to run for", default=10)
     parser.add_argument("-d", "--debug", action='store_true', help="run with a small dataset", default=False)
     parser.add_argument("-o", "--outdir", type=str, help="the directory to save output to", default='.')
+    parser.add_argument("-n", "--data_size", type=int, help="number of samples to use from each class", default=None)
+    parser.add_argument("--early_stopping", action='store_true', help="enable early stopping", default=False)
+
 
     args = parser.parse_args(argv)
 
@@ -115,17 +119,17 @@ def train(argv=None):
     train_files = args.training
     val_files = args.validation
     
+    n = args.data_size
+
 
     logger.info(f"Loading training data: {len(train_files)} files")
-    train_dataset = LMDataset(train_files, transform=transform, logger=logger, return_labels=True, label_types=args.labels)
+    train_dataset = LMDataset(train_files, transform=transform, logger=logger, return_labels=True, label_types=args.labels,n=n)
     for i in range(train_dataset.labels.shape[1]):
         logger.info(train_dataset.label_types[i] + " - " + str(torch.unique(train_dataset.labels[:, i])) + str(train_dataset.label_classes))
-    
-
 
     
     logger.info(f"Loading validation data: {len(val_files)} files")
-    val_dataset = LMDataset(val_files, transform=transform, logger=logger, return_labels=True, label_types=args.labels)
+    val_dataset = LMDataset(val_files, transform=transform, logger=logger, return_labels=True, label_types=args.labels,n=n)
     for i in range(val_dataset.labels.shape[1]):
         logger.info(val_dataset.label_types[i] + " - " + str(torch.unique(val_dataset.labels[:, i])) + str(val_dataset.label_classes))
 
@@ -142,21 +146,24 @@ def train(argv=None):
     # trainer = L.Trainer(max_epochs=args.epochs, devices=1, logger=wandb_logger, accelerator=accelerator)
     # trainer.fit(model, train_loader, val_loader)
 
-    # EarlyStopping callback
-    early_stopping = EarlyStopping(
-        monitor="val_accuracy",  
-        min_delta=0.000001,      
-        patience=10,         
-        verbose=False,      
-        mode="max"          
-    )
+
+    callbacks = []
+    if args.early_stopping:
+        early_stopping = EarlyStopping(
+         monitor="val_accuracy",  
+         min_delta=0.000001,      
+         patience=10,         
+         verbose=False,      
+         mode="max"          
+        )
+        callbacks.append(early_stopping)
 
 
     trainer = L.Trainer(
-        max_epochs=args.epochs,                       ##CHANGE THIS TO 100
+        max_epochs=args.epochs,                      
         devices=1,
         accelerator=accelerator,
-        callbacks=[early_stopping],  #UNCOMMENT WHEN DONE
+        callbacks=callbacks,  #UNCOMMENT WHEN DONE
         logger=wandb_logger  
     )
     
@@ -170,12 +177,14 @@ def train(argv=None):
 
 def predict(argv=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument('labels', type=str, nargs='+', help="the label to predict with")
+    parser.add_argument('labels', type=str, help="the label to predict with") #Let us currently only work with single label. We will add other labels in future  (Andrew)
     parser.add_argument("--prediction", type=str, nargs='+', required=True, help="directories containing prediction data")
     parser.add_argument("-c","--checkpoint", type=str, help="path to the model checkpoint file to use for inference")      
     parser.add_argument("-o","--output_npz", type=str, help="the path to save the embeddings to. Saved in NPZ format")
     parser.add_argument("-d", "--debug", action='store_true', help="run with a small dataset", default=False)
     parser.add_argument("-p", "--pred-only", action='store_true', default=False, help="only save predictions, otherwise save original image data and labels in output_npz")
+    parser.add_argument("-n", "--data_size", type=int, help="number of samples to use from each class", default=None)
+
 
     args = parser.parse_args(argv)
 
@@ -183,10 +192,11 @@ def predict(argv=None):
     transform = get_transform()  
 
     predict_files = args.prediction
+    n = args.data_size
+
 
     logger.info(f"Loading predicting data: {len(predict_files)} files")
-    predict_dataset = LMDataset(predict_files, transform=transform, logger=logger, return_labels=True, label_types=args.labels)
-
+    predict_dataset = LMDataset(predict_files, transform=transform, logger=logger, return_labels=True, label_types=args.labels,n=n)
     for i in range(predict_dataset.labels.shape[1]):
         logger.info(predict_dataset.label_types[i] + " - " + str(torch.unique(predict_dataset.labels[:, i])) + str(predict_dataset.label_classes))
 
@@ -218,6 +228,11 @@ def predict(argv=None):
     # out_data = dict(predictions=predictions)
     out_data = dict(predictions=predictions, true_labels=true_labels)  ##Recently added
 
+    #NEW STUFF FOR 02/08
+    true_labels = np.array(true_labels)
+    pred_labels = np.array(pred_labels)
+    correct_incorrect = np.where(pred_labels == true_labels ,1 ,0)  #maybe just remove this variable declared 
+    out_data = dict(predictions = predictions, true_labels = true_labels, pred_labels = pred_labels, correct_incorrect = correct_incorrect)
 
     if not args.pred_only:
         dset = predict_dataset
@@ -226,7 +241,11 @@ def predict(argv=None):
             out_data[k + "_classes"] = dset.label_classes[i]
             out_data[k + "_labels"] = np.asarray(dset.labels[:, i])
 
+    #np.savez(args.output_npz, **out_data)
+    #NEW STUFF
+    # np.savez(args.output_npz, predictions = predictions, true_labels = true_labels, pred_labels = pred_labels, correct_incorrect = correct_incorrect)
     np.savez(args.output_npz, **out_data)
+            
 
 if __name__ == '__main__':
     train()
