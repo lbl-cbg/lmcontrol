@@ -39,14 +39,6 @@ class ResNet(L.LightningModule):
     def forward(self, x):
         return self.backbone(x) 
 
-    # def training_step(self, batch, batch_idx): 
-    #     images, labels = batch
-    #     outputs = self.forward(images)
-    #     loss = self.criterion(outputs, labels[:, 0])
-    #     self.log('train_loss', loss, batch_size=images.size(0))
-    #     return loss
-      
-
     def training_step(self, batch, batch_idx): 
         images, labels = batch
         outputs = self.forward(images)
@@ -59,14 +51,7 @@ class ResNet(L.LightningModule):
         
         self.log('train_loss', loss, batch_size=images.size(0))
         return loss    
-
-    # def validation_step(self, batch, batch_idx):
-    #     images, labels = batch
-    #     outputs = self.forward(images)
-    #     loss = self.criterion(outputs, labels[:, 0])
-    #     self.log('val_loss', loss, batch_size=images.size(0))
-    #     return loss 
-
+    
     def validation_step(self, batch, batch_idx):
         images, labels = batch
         outputs = self.forward(images)
