@@ -122,17 +122,11 @@ def get_transform(transform1=None, transform2=None):
     return transform
 
 
-def get_npzs(timepoints, hts):
-    ret = list()
-    for tp in timepoints:
-        for ht in hts:
-            ret.extend(glob.glob(f"S{tp}/*HT{ht}/*.npz"))
-    return ret
-
-
 def train(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("experiment", type=str, help="the experiment name")
+    parser.add_argument("-T", "--training", nargs='+', type=str, help="the NPZs with cropped images to use for training")
+    parser.add_argument("-V", "--validation", nargs='+', type=str, help="the NPZs with cropped images to use for validation")
     parser.add_argument("-o", "--outdir", type=str, help="the directory to save output to", default='.')
     parser.add_argument("-c", "--checkpoint", type=str, help="checkpoint file to pick up from", default=None)
     parser.add_argument("-e", "--epochs", type=int, help="the number of epochs to run for", default=10)
@@ -142,14 +136,12 @@ def train(argv=None):
 
     logger = get_logger('info')
 
+    train_files = args.training
+    val_files = args.validation
 
     if args.debug:
-        train_files = get_npzs(["14", "4"], ["1"])
-        val_files = get_npzs(["10"], ["5"])
         num_workers = 0
     else:
-        train_files = get_npzs(["4", "14"], ["1", "2", "3", "4", "6", "7", "8", "9", "11", "12"])
-        val_files = get_npzs(["10"], ["5", "10"])
         num_workers = 3
 
     train_tfm = get_transform()
@@ -194,6 +186,7 @@ def predict(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("checkpoint", type=str, help="path to the model checkpoint file to use for inference")
     parser.add_argument("output_npz", type=str, help="the path to save the embeddings to. Saved in NPZ format")
+    parser.add_argument("input_npz", nargs='+', type=str, help="the NPZs with cropped images to run inference on")
     parser.add_argument("-d", "--debug", action='store_true', help="run with a small dataset", default=False)
     parser.add_argument("-p", "--pred-only", action='store_true', default=False,
                         help="only save predictions, otherwise save original image data and labels in output_npz")
@@ -202,10 +195,7 @@ def predict(argv=None):
 
     logger = get_logger('info')
 
-    if args.debug:
-        test_files = sorted(glob.glob(f"S4/*HT*1/*.npz"))
-    else:
-        test_files = sorted(glob.glob(f"S*/*HT*/*.npz"))
+    test_files = args.input_npz
 
     transform = _get_transforms('float', 'norm', 'crop', 'rgb')
     logger.info(f"Loading training data: {len(test_files)} files")
