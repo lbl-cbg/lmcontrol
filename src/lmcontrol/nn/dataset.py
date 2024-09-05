@@ -58,7 +58,8 @@ class Norm(T._transform.Transform):
     def __call__(self, sample: torch.Tensor) -> torch.Tensor:
         ret = self.T(self.T(sample) - self.T(sample.mean(dim=(-2, -1))))
         if self.scale:
-            ret = self.T(self.T(ret) / self.T(torch.amax(torch.abs(ret), dim=(-2, -1))))
+            #ret = self.T(self.T(ret) / self.T(torch.amax(torch.abs(ret), dim=(-2, -1))))
+            ret = self.T(self.T(ret) / self.T(torch.std(ret, dim=(-2, -1)))) #Changed from max -> standard deviation
         return ret
 
 
