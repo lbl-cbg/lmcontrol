@@ -23,12 +23,14 @@ def main():
         'Self-supervised Learning': {
             'train-byol': Command('nn.byol.train', 'Train BYOL model'),
             'infer-byol': Command('nn.byol.predict', 'Run with inference BYOL backbone'),
-            
+
         },
         'Supervised Learning':{
             'train-clf': Command('nn.clf.train', 'Train with classifier'),
             'predict-clf': Command( 'nn.clf.predict', 'Predict with classifier'),
-            'stratify-clf': Command('nn.stratify-clf.stratify', 'Training and predicting with train_test_split stuff')
+            'stratify-clf': Command('nn.stratify-clf.stratify', 'Training and predicting with train_test_split stuff'),
+            'tune-clf': Command('nn.clf.tune', 'Tune classifier with Optuna'),
+
 
         },
     }
