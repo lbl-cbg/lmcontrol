@@ -1,5 +1,5 @@
 
-# function 'norm ' has been modified. Please kwwp a check of it.
+# function 'norm ' has been modified. Please keep a check of it.
 import numpy as np
 from lightly.data import LightlyDataset
 import torch
