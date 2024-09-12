@@ -1,7 +1,7 @@
 from functools import partial
 from typing import Any, Callable, List, Optional, Type, Union
 
-from torchvision.utils import _log_api_usage_once   # the relative imports have to be like these
+from torchvision.utils import _log_api_usage_once   
 from torchvision.models.resnet import _resnet, Bottleneck, BasicBlock, conv1x1, conv3x3
 
 import torch
