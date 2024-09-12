@@ -1,3 +1,11 @@
+
+
+
+####NOTE####
+### This was solely done for the purpose of learning about the effects of "Batch Effects". It is very clear that batch effects is affecting the results. WE WONT BE USING THIS CODE ANYMORE###
+
+###Note that here n means the total number of data points that shall be taken from each of the class
+
 import argparse
 import glob
 import lightning as L
@@ -22,7 +30,7 @@ from lightning.pytorch.callbacks import EarlyStopping
 from torch.utils.data import Dataset
 from sklearn.model_selection import train_test_split
 
-from ..data_utils import encode_labels, load_npzs
+from ..data_utils import encode_labels
 from ..utils import get_logger
 
 from sklearn.preprocessing import LabelEncoder
@@ -30,10 +38,64 @@ from sklearn.model_selection import train_test_split
 
 from torch.utils.data import DataLoader
 
+import numpy as np
+
+def load_npzs(npzs, logger, n=None, label_types=None):
+    """Load data from NPZ files generated from lmcontrol crop command"""
+    masks = []
+    images = []
+    paths = []
+    metadata = dict()
+    
+    for npz_path in npzs:
+        logger.debug(f"Reading {npz_path}")
+        npz = np.load(npz_path)
+        
+        total_samples = len(npz['masks'])
+        
+        if n is not None and total_samples > n:
+            indices = np.random.permutation(total_samples)[:n]
+        else:
+            indices = np.arange(total_samples)
+        
+        masks.append(npz['masks'][indices])
+        images.append(npz['images'][indices])
+        paths.append(npz['paths'][indices])
+
+        md_keys = set(npz.keys()) - {'paths', 'masks', 'images'}
+        logger.debug(f"Found the following keys in {npz_path}: {' '.join(sorted(md_keys))}")
+        
+        for k in sorted(md_keys):
+            if npz[k].ndim == 0:
+                metadata.setdefault(k, []).extend([str(npz[k])] * len(indices))
+            else:
+                metadata.setdefault(k, []).extend(np.array(npz[k])[indices])
+
+    logger.debug("Merging masks")
+    masks = np.concatenate(masks, axis=0)
+    logger.debug("Merging images")
+    images = np.concatenate(images, axis=0)
+    logger.debug("Merging paths")
+    paths = np.concatenate(paths, axis=0)
+    
+    metadata = {k: np.array(v) for k, v in metadata.items()}
+
+    target_len = len(masks)
+    for k in metadata.keys():
+        if len(metadata[k]) != target_len:
+            logger.critical(f"Metadata '{k}' not found in all NPZ files")
+            raise ValueError(f"Metadata '{k}' length mismatch: expected {target_len}, got {len(metadata[k])}")
+
+    return masks, images, paths, metadata
+
+
+#############################################################################################################################
+
+
 
 class LMDataset(Dataset):
     def __init__(self, npzs, use_masks=False, return_labels=False, logger=None, transform=None, label_types=None, n=None,
-                 train_ratio=0.6, val_ratio=0.2, test_ratio=0.2, split='train'):
+                 train_ratio = 0.7, val_ratio = 0.15, test_ratio = 0.15, split='train'):
         """
         Args:
             npzs (array-like)       : A list or tuple of paths to NPZ files containing cropped images
@@ -201,7 +263,7 @@ def stratify(argv=None):
     
     logger = get_logger('info')
     transform = get_transform()
-
+    
     n = args.data_size
 
     logger.info(f"loading datasets")
@@ -223,7 +285,7 @@ def stratify(argv=None):
     test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False, drop_last=True, num_workers=num_workers)
 
     logger.info(f"Starting training")
-    model = ResNet(num_classes=3)   # this is a quick fix, it will not work if we specify more than one label
+    model = ResNet(num_classes=3)   # this is a quick fix, it will not work if we specify more than one label (Andrew)
     accelerator = "gpu" if torch.cuda.is_available() else "cpu"
 
     wandb.init(project="SX_HTY_Run1")
