@@ -10,7 +10,7 @@ from torch import Tensor
 
 torch.no_grad()
 
-# ***************** IPORTANT ************* #
+# ***************** IPORTANT (can be deleted ) ************* #
 
 # # *************** The following model will expect input as :
 # input = torch.randn(32, 3, 32, 32)   # batch_size=32, 3 channels, 32x32 image
