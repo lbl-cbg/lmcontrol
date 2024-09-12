@@ -106,7 +106,7 @@ class ResNet(nn.Module):
         stride: int = 1,
         dilate: bool = False,
     ) -> nn.Sequential:
-        if blocks == 0:  # *******************this is added 
+        if blocks == 0:  # *******************this is newly added 
             return nn.Identity()
         norm_layer = self._norm_layer
         downsample = None
