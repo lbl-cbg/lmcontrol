@@ -2,15 +2,17 @@ from functools import partial
 from typing import Any, Callable, List, Optional, Type, Union
 
 from torchvision.utils import _log_api_usage_once   
-from torchvision.models.resnet import _resnet, Bottleneck, BasicBlock, conv1x1, conv3x3
+from torchvision.models.resnet import Bottleneck, BasicBlock, conv1x1, conv3x3
+from torchvision.models._utils import _ovewrite_named_param
+from torchvision.models._api import register_model, Weights, WeightsEnum
 
 import torch
 import torch.nn as nn
 from torch import Tensor
 
-torch.no_grad()
-
-# ***************** IPORTANT (can be deleted ) ************* #
+from torchvision.models._meta import _IMAGENET_CATEGORIES
+from torchvision.models._utils import _ovewrite_named_param, handle_legacy_interface
+# ***************** IMPORTANT (can be deleted ) ************* #
 
 # # *************** The following model will expect input as :
 # input = torch.randn(32, 3, 32, 32)   # batch_size=32, 3 channels, 32x32 image
@@ -71,14 +73,24 @@ class ResNet(nn.Module):
 
         if planes is None:
             planes = [64, 128, 256, 512]
-        
+
         self.layer1 = self._make_layer(block, planes[0], layers[0])
         self.layer2 = self._make_layer(block, planes[1], layers[1], stride=2, dilate=replace_stride_with_dilation[0])
         self.layer3 = self._make_layer(block, planes[2], layers[2], stride=2, dilate=replace_stride_with_dilation[1])
         self.layer4 = self._make_layer(block, planes[3], layers[3], stride=2, dilate=replace_stride_with_dilation[2])
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
         idx = max(i for i in range(len(layers)) if layers[i] != 0) #**********added 
-        self.fc = nn.Linear(planes[idx] * block.expansion, num_classes)
+
+        if block == BasicBlock:
+            expansion = [1, 1, 1, 1] 
+        elif block == Bottleneck:
+            expansion = [4, 4, 4, 4]
+
+
+        idx = max(i for i in range(len(layers)) if layers[i] != 0)
+        n_features = planes[idx] * expansion[idx]
+
+        self.fc = nn.Linear(n_features, num_classes)
 
 
         for m in self.modules():
@@ -106,7 +118,7 @@ class ResNet(nn.Module):
         stride: int = 1,
         dilate: bool = False,
     ) -> nn.Sequential:
-        if blocks == 0:  # *******************this is newly added 
+        if blocks == 0:  # ******************* this is newly added 
             return nn.Identity()
         norm_layer = self._norm_layer
         downsample = None
@@ -126,7 +138,9 @@ class ResNet(nn.Module):
                 self.inplanes, planes, stride, downsample, self.groups, self.base_width, previous_dilation, norm_layer
             )
         )
+    
         self.inplanes = planes * block.expansion  # *** Doing this isn't ethical in programming, NEVER change 'self' 
+
         for _ in range(1, blocks):
             layers.append(
                 block(
@@ -143,6 +157,7 @@ class ResNet(nn.Module):
 
     def _forward_impl(self, x: Tensor) -> Tensor:
         # See note [TorchScript super()]
+        
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
@@ -161,3 +176,22 @@ class ResNet(nn.Module):
 
     def forward(self, x: Tensor) -> Tensor:
         return self._forward_impl(x)
+
+def _resnet(
+    block: Type[Union[BasicBlock, Bottleneck]],
+    layers: List[int],
+    planes: List[int],
+    num_classes: int,
+    weights: Optional[WeightsEnum],
+    progress: bool,
+    **kwargs: Any,
+) -> ResNet:
+    if weights is not None:
+        _ovewrite_named_param(kwargs, "num_classes", len(weights.meta["categories"]))
+
+    model = ResNet(block=block, layers=layers, planes=planes, num_classes=num_classes)
+
+    if weights is not None:
+        model.load_state_dict(weights.get_state_dict(progress=progress, check_hash=True))
+
+    return model
