@@ -23,18 +23,16 @@ from lightning.pytorch.callbacks import EarlyStopping
 from sklearn.preprocessing import LabelEncoder
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
-import numpy as np
 from lightning.pytorch.callbacks import ModelCheckpoint
-from torchvision.models.resnet import BasicBlock, _resnet  
+from torchvision.models.resnet import BasicBlock, Bottleneck 
 from typing import Type, Union, List, Optional, Callable, Any
-# from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from optuna.integration import PyTorchLightningPruningCallback
 
 from ..utils import get_logger
 from .dataset import LMDataset, get_transforms as _get_transforms
+from lmcontrol.nn.resnet import _resnet  
 
-#Note:Add functionality to call ResNet10, 14 and 18 . Use bottleneck for ResNet14.                    
-def resnet10(*, weights = None, progress = True, **kwargs) :
+def resnet(*, weights=None, progress=True, block=None, layers=None, planes=None,num_classes=None) :
     """ResNet-18 from `Deep Residual Learning for Image Recognition <https://arxiv.org/abs/1512.03385>`__.
 
     Args:
@@ -53,8 +51,7 @@ def resnet10(*, weights = None, progress = True, **kwargs) :
     .. autoclass:: torchvision.models.ResNet18_Weights
         :members:
     """
-
-    return _resnet(BasicBlock, [1, 1, 1, 1], weights, progress, **kwargs)
+    return _resnet(block=block, layers=layers, planes=planes, num_classes=num_classes, weights=weights, progress=progress)
 
 def encode_labels(labels, return_classes=True):
     """This is a wrapper for sklearn.preprocessing.LabelEncoder"""
@@ -171,23 +168,30 @@ class LMDataset(Dataset):
 
 
 
-class ResNet(L.LightningModule):
+class LightningResNet(L.LightningModule):
 
     val_metric = "validation_ncs"
     train_metric = "train_ncs"
 
-    def __init__(self, num_classes, lr=0.01, step_size=2, gamma=0.1):
+    def __init__(self, num_classes, lr=0.01, step_size=2, gamma=0.1, planes=None, layers=None, block=None):
         super().__init__()
-        #self.backbone = torchvision.models.resnet18(pretrained=False)
-        self.backbone = resnet10()  #this function call can be edited 
-        n_features = 512
-        self.backbone.fc = nn.Linear(n_features, num_classes)
+
+        weights = None 
+        progress = True
+        num_classes = 3
+        
+        ## Give input here
+        block = Bottleneck
+        layers = [1, 1, 1, 1]
+        planes = [16, 32, 64, 128]
+
+        self.backbone = resnet(weights=None, progress=True, block=block, layers=layers, planes=planes,num_classes=num_classes) 
         self.criterion = nn.CrossEntropyLoss()
-        self.save_hyperparameters() #this is an important part, we didnt add it before. STUDY WHY THIS MATTERED
-        self.lr = lr # even if we mention lr here, we obtain the passed value and not the default value mentioned above 
+        self.save_hyperparameters()
+        self.lr = lr
         self.step_size = step_size
         self.gamma = gamma
-
+        
     def forward(self, x):
         return self.backbone(x)
 
@@ -196,7 +200,6 @@ class ResNet(L.LightningModule):
         outputs = self.forward(images)
         loss = self.criterion(outputs, labels[:, 0])
 
-        # Logging accuracy
         preds = torch.argmax(outputs, dim=1)
         acc = accuracy_score(labels[:, 0].cpu().numpy(), preds.cpu().numpy())
         self.log('train_accuracy', acc, on_step=False, on_epoch=True, prog_bar=True)
@@ -276,7 +279,7 @@ def _get_loaders_and_model(args,  logger=None):
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, drop_last=True, num_workers=num_workers)
     val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, drop_last=True, num_workers=num_workers)
 
-    model = ResNet(num_classes=len(train_dataset.label_classes[0]),lr=args.lr, step_size=args.step_size, gamma=args.gamma)
+    model = LightningResNet(num_classes=len(train_dataset.label_classes[0]),lr=args.lr, step_size=args.step_size, gamma=args.gamma)
 
     return train_loader, val_loader, model
 
@@ -360,7 +363,7 @@ def tune(argv=None):
         with open(pkl, 'wb') as file:
             pickle.dump(args, file)
 
-    pruner = optuna.pruners.MedianPruner() if args.pruning else optuna.pruners.NopPruner()
+    #pruner = optuna.pruners.MedianPruner() if args.pruning else optuna.pruners.NopPruner()
     #study = optuna.create_study(direction="maximize", pruner=pruner)
 
     obj = partial(objective, args)
@@ -400,7 +403,7 @@ def predict(argv=None):
 
     predict_loader = DataLoader(predict_dataset, batch_size=32, shuffle=False, drop_last=False, num_workers=3)
 
-    model = ResNet.load_from_checkpoint(args.checkpoint)
+    model = LightningResNet.load_from_checkpoint(args.checkpoint)
     accelerator = "gpu" if torch.cuda.is_available() else "cpu"
     trainer = L.Trainer(devices=1, accelerator=accelerator)
 
