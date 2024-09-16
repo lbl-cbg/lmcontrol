@@ -175,17 +175,10 @@ class LightningResNet(L.LightningModule):
 
     def __init__(self, num_classes, lr=0.01, step_size=2, gamma=0.1, planes=None, layers=None, block=None):
         super().__init__()
-
-        weights = None 
-        progress = True
-        num_classes = 3
-        
-        ## Give input here
-        block = Bottleneck
-        layers = [1, 1, 1, 1]
-        planes = [16, 32, 64, 128]
-
-        self.backbone = resnet(weights=None, progress=True, block=block, layers=layers, planes=planes,num_classes=num_classes) 
+        #self.backbone = torchvision.models.resnet18(pretrained=False)
+        self.backbone = resnet10()  #this function call can be edited 
+        n_features = 512
+        self.backbone.fc = nn.Linear(n_features, num_classes)
         self.criterion = nn.CrossEntropyLoss()
         self.save_hyperparameters()
         self.lr = lr
