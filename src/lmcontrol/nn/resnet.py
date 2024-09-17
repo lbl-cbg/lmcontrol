@@ -12,35 +12,14 @@ from torch import Tensor
 
 from torchvision.models._meta import _IMAGENET_CATEGORIES
 from torchvision.models._utils import _ovewrite_named_param, handle_legacy_interface
-# ***************** IMPORTANT (can be deleted ) ************* #
-
-# # *************** The following model will expect input as :
-# input = torch.randn(32, 3, 32, 32)   # batch_size=32, 3 channels, 32x32 image
-
-# block = Bottleneck  #BasicBlock reduces the paramaters
-# layers = [0, 1, 0, 0]
-# planes = [16, 32, 64, 128]
-
-# my_resnet = ResNet(block, layers, planes=planes, num_classes=3)  #BasicBlock will only have the width_per_group=64 and groups=1 only. Use bottleneck otherwise 
-
-# # *************** To view the model:
-# my_resnet  # Shows the summary of the model
-
-# # *************** To check the results:
-# with torch.no_grad():
-#     ret = my_resnet(input)
-# ret.shape
-
-# num_params = sum(p.numel() for p in my_resnet.parameters() if p.requires_grad)
-# print(f"Total number of trainable parameters: {num_params}")
 
 class ResNet(nn.Module):
     def __init__(
         self,
         block: Type[Union[BasicBlock, Bottleneck]],
         layers: List[int],
-        planes: Optional[List[int]] = None,  ##newly added stuff, we basically need to reduce the paramaters in the code so that we deal with less parameters
-        num_classes: int = 1000, #this 1000 can be overwritten with the input you desire
+        planes: List[int],
+        num_classes: int = 1000, 
         zero_init_residual: bool = False,
         groups: int = 1,
         width_per_group: int = 64,
@@ -53,7 +32,7 @@ class ResNet(nn.Module):
             norm_layer = nn.BatchNorm2d
         self._norm_layer = norm_layer
 
-        self.inplanes = planes[0] # This was hardcooded to be 64
+        self.inplanes = planes[0] 
         self.dilation = 1
         if replace_stride_with_dilation is None:
             # each element in the tuple indicates if we should replace
@@ -79,7 +58,7 @@ class ResNet(nn.Module):
         self.layer3 = self._make_layer(block, planes[2], layers[2], stride=2, dilate=replace_stride_with_dilation[1])
         self.layer4 = self._make_layer(block, planes[3], layers[3], stride=2, dilate=replace_stride_with_dilation[2])
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        idx = max(i for i in range(len(layers)) if layers[i] != 0) #**********added 
+        idx = max(i for i in range(len(layers)) if layers[i] != 0)  
 
         if block == BasicBlock:
             expansion = [1, 1, 1, 1] 
@@ -118,7 +97,7 @@ class ResNet(nn.Module):
         stride: int = 1,
         dilate: bool = False,
     ) -> nn.Sequential:
-        if blocks == 0:  # ******************* this is newly added 
+        if blocks == 0:  
             return nn.Identity()
         norm_layer = self._norm_layer
         downsample = None
@@ -139,7 +118,7 @@ class ResNet(nn.Module):
             )
         )
     
-        self.inplanes = planes * block.expansion  # *** Doing this isn't ethical in programming, NEVER change 'self' 
+        self.inplanes = planes * block.expansion  # Not good to change self
 
         for _ in range(1, blocks):
             layers.append(
@@ -188,7 +167,7 @@ def _resnet(
 ) -> ResNet:
     if weights is not None:
         _ovewrite_named_param(kwargs, "num_classes", len(weights.meta["categories"]))
-
+        
     model = ResNet(block=block, layers=layers, planes=planes, num_classes=num_classes)
 
     if weights is not None:
