@@ -173,17 +173,13 @@ class LightningResNet(L.LightningModule):
     val_metric = "validation_ncs"
     train_metric = "train_ncs"
 
-    def __init__(self, num_classes, lr=0.01, step_size=2, gamma=0.1, planes=None, layers=None, block=None):
+    def __init__(self, num_classes, lr=0.01, step_size=2, gamma=0.1, planes=[8, 16, 32, 64], layers=[1, 1, 1, 1], block=BasicBlock):
         super().__init__()
 
         weights = None 
         progress = True
-        num_classes = 3
 
-        ## Give input here
-        block = Bottleneck
-        layers = [1, 1, 1, 1]
-        planes = [8, 16, 32, 64]
+        #num_classes = len(train_dataset.label_classes[0])  #configure this once the above are tuned 
 
         self.backbone = resnet(weights=None, progress=True, block=block, layers=layers, planes=planes,num_classes=num_classes) 
         self.criterion = nn.CrossEntropyLoss()
@@ -191,6 +187,9 @@ class LightningResNet(L.LightningModule):
         self.lr = lr
         self.step_size = step_size
         self.gamma = gamma
+        self.block = block
+        self.planes = planes
+        self.layers = layers
         
     def forward(self, x):
         return self.backbone(x)
@@ -234,6 +233,20 @@ def get_transform():
     transform = _get_transforms('float', 'norm','blur','rotate', 'crop','hflip', 'vflip', 'noise', 'rgb')
     return transform
 
+def get_block(block_type):
+    return {
+        'BasicBlock': BasicBlock,
+        'Bottleneck': Bottleneck
+    }[block_type]
+
+def get_planes(plane_cmd):
+    p = int(plane_cmd)  
+    return [2**p, 2**(p+1), 2**(p+2), 2**(p+3)]
+
+def get_layers(layers_cmd):
+    l = int(layers_cmd)  
+    layers = [1 if i < l else 0 for i in range(4)]  
+    return layers
 
 def _add_training_args(parser):
     parser.add_argument('labels', type=str, help="the label to train with") #Let us currently only work with single label. We will add other labels in future (Andrew)
@@ -249,6 +262,9 @@ def _add_training_args(parser):
     parser.add_argument("--step_size", type=int, help="step size for learning rate scheduler", default=10)
     parser.add_argument("--gamma", type=float, help="gamma for learning rate scheduler", default=0.1)
     parser.add_argument("--batch_size", type=int, help="batch size for training and validation", default=32)
+    parser.add_argument("--block", type=get_block, choices=['BasicBlock', 'Bottleneck'], help="type of block to use in the model", default='BasicBlock')
+    parser.add_argument("--planes", type=get_planes, choices=['3', '4'], help="list of number of planes for each layer", default='3')
+    parser.add_argument("--layers", type=get_layers, choices=['1', '2', '3', '4'], help="list of number of layers in each stage", default='4')
 
 
 def _get_loaders_and_model(args,  logger=None):
@@ -279,7 +295,7 @@ def _get_loaders_and_model(args,  logger=None):
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, drop_last=True, num_workers=num_workers)
     val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, drop_last=True, num_workers=num_workers)
 
-    model = LightningResNet(num_classes=len(train_dataset.label_classes[0]),lr=args.lr, step_size=args.step_size, gamma=args.gamma)
+    model = LightningResNet(num_classes=len(train_dataset.label_classes[0]),lr=args.lr, step_size=args.step_size, gamma=args.gamma, block=args.block, planes=args.planes, layers=args.layers)
 
     return train_loader, val_loader, model
 
@@ -300,10 +316,11 @@ def _get_trainer(args, trial=None):
          mode="max"
         )
         callbacks.append(early_stopping)
-
-    if trial is not None:   # if 'trial' is passed in, assume we are using Optuna to do HPO
-        callbacks.append(PyTorchLightningPruningCallback(trial, monitor="val_accuracy"))
+        
+    if trial is not None :   # if 'trial' is passed in, assume we are using Optuna to do HPO        
         targs['logger'] = CSVLogger(args.outdir, name=args.experiment)
+        if args.pruning:
+            callbacks.append(PyTorchLightningPruningCallback(trial, monitor="val_accuracy"))
     else:
         wandb.init(project="SX_HTY_Run1")
         targs['logger'] = WandbLogger(project='your_project_name', log_model=True)
@@ -325,13 +342,22 @@ def train(argv=None):
     trainer = _get_trainer(args)
     trainer.fit(model, train_loader, val_loader)
 
-
 def objective(args, trial):
-
     args.batch_size = trial.suggest_int('batch_size', 32, 256, log=True)
     args.lr = trial.suggest_float("lr", 1e-5, 1e-2, log=True)
     args.step_size = trial.suggest_int('step_size', 5, 15, step=5)
     args.gamma = trial.suggest_float('gamma', 0.1, 0.5)
+
+
+    block_type = trial.suggest_categorical('block_type', ['BasicBlock', 'Bottleneck'])
+    args.block = get_block(block_type)
+
+    p = trial.suggest_categorical('planes', ['3', '4'])  
+    args.planes = get_planes(p)
+
+    l = trial.suggest_categorical('layers', ['1', '2', '3', '4'])  
+    args.layers = get_layers(l)
+
     args.outdir = os.path.join(args.working_dir, "logs")
     args.experiment = f"trial_{trial.number:04d}"
 
@@ -346,7 +372,8 @@ def tune(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("working_dir", type=str, help="the SQLite database to use")
     parser.add_argument("-t", "--n_trials", type=int, help="the number of trials to run", default=1)
-    parser.add_argument("--pruning", action='store_true', help="Enable Optuna pruning", default=True)
+    parser.add_argument("--pruning", action='store_true', help="Enable Optuna pruning", default=False)
+    parser.add_argument("-r", "--restart", action='store_true', help="Restart study", default=False)
 
     _add_training_args(parser)
 
@@ -355,21 +382,21 @@ def tune(argv=None):
     logger = get_logger('info')
     logger.info(f"Will run {args.n_trials} trials")
     pkl = os.path.join(args.working_dir, "args.pkl")
-    if os.path.exists(pkl):
-        with open(pkl, 'rb') as file:
-            args = pickle.load(file)
-    else:
+    db = os.path.join(args.working_dir, "study.db")
+    if not os.path.exists(pkl) or args.restart:
         os.makedirs(args.working_dir, exist_ok=True) #adding this exist_ok check for the pre existence of file 
         with open(pkl, 'wb') as file:
             pickle.dump(args, file)
-
-    #pruner = optuna.pruners.MedianPruner() if args.pruning else optuna.pruners.NopPruner()
-    #study = optuna.create_study(direction="maximize", pruner=pruner)
+        if args.restart and os.path.exists(db):
+            os.remove(db)                    
+    else:
+        with open(pkl, 'rb') as file:
+            args = pickle.load(file)
 
     obj = partial(objective, args)
 
     # NOTE: I have changed the position of keyword: 'maximise'
-    study = optuna.create_study(storage=f"sqlite:///{args.working_dir}/study.db", study_name="study", load_if_exists=True, direction="maximize")
+    study = optuna.create_study(storage=f"sqlite:///{db}", study_name="study", load_if_exists=True, direction="maximize")
 
     study.optimize(obj, n_trials=args.n_trials)
 
