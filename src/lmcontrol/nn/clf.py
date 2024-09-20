@@ -69,7 +69,7 @@ def load_npzs(npzs, logger, n=None, label_types=None):
     images = []
     paths = []
     metadata = dict()
-    
+
     for npz_path in npzs:
         logger.debug(f"Reading {npz_path}")
         npz = np.load(npz_path)
@@ -221,7 +221,7 @@ class LightningResNet(L.LightningModule):
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=0.01)
-        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
+        scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[5], gamma=0.1)
         return [optimizer], [scheduler]
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):  #Added this part, read the pytorch documentation to understand how its used
@@ -262,8 +262,8 @@ def _add_training_args(parser):
     parser.add_argument("--step_size", type=int, help="step size for learning rate scheduler", default=10)
     parser.add_argument("--gamma", type=float, help="gamma for learning rate scheduler", default=0.1)
     parser.add_argument("--batch_size", type=int, help="batch size for training and validation", default=32)
-    parser.add_argument("--block", type=get_block, choices=['BasicBlock', 'Bottleneck'], help="type of block to use in the model", default='BasicBlock')
-    parser.add_argument("--planes", type=get_planes, choices=['3', '4'], help="list of number of planes for each layer", default='3')
+    parser.add_argument("--block", type=get_block, choices=['BasicBlock', 'Bottleneck'], help="type of block to use in the model", default='Bottleneck')
+    parser.add_argument("--planes", type=get_planes, choices=['3', '4'], help="list of number of planes for each layer", default='4')
     parser.add_argument("--layers", type=get_layers, choices=['1', '2', '3', '4'], help="list of number of layers in each stage", default='4')
 
 
@@ -310,8 +310,8 @@ def _get_trainer(args, trial=None):
     if args.early_stopping:
         early_stopping = EarlyStopping(
          monitor="val_accuracy",
-         min_delta=0.000001,
-         patience=10,
+         min_delta=0.001,
+         patience=3,
          verbose=False,
          mode="max"
         )
