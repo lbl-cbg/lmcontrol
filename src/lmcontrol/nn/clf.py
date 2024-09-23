@@ -179,8 +179,6 @@ class LightningResNet(L.LightningModule):
         weights = None 
         progress = True
 
-        #num_classes = len(train_dataset.label_classes[0])  #configure this once the above are tuned 
-
         self.backbone = resnet(weights=None, progress=True, block=block, layers=layers, planes=planes,num_classes=num_classes) 
         self.criterion = nn.CrossEntropyLoss()
         self.save_hyperparameters()
@@ -224,7 +222,7 @@ class LightningResNet(L.LightningModule):
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[5], gamma=0.1)
         return [optimizer], [scheduler]
 
-    def predict_step(self, batch, batch_idx, dataloader_idx=0):  #Added this part, read the pytorch documentation to understand how its used
+    def predict_step(self, batch, batch_idx, dataloader_idx=0):  #Read the pytorch documentation to understand how its used
         x = batch[0]
         return self.forward(x).flatten(start_dim=1)
 
@@ -305,7 +303,7 @@ def _get_trainer(args, trial=None):
 
     callbacks = []
 
-    targs = dict(max_epochs=args.epochs, devices=1, accelerator=accelerator, callbacks=callbacks)
+    targs = dict(max_epochs=args.epochs, devices=1, accelerator=accelerator, check_val_every_n_epoch=4, callbacks=callbacks)
 
     if args.early_stopping:
         early_stopping = EarlyStopping(
@@ -316,6 +314,16 @@ def _get_trainer(args, trial=None):
          mode="max"
         )
         callbacks.append(early_stopping)
+
+    if args.checkpoint:
+        checkpoint_callback = ModelCheckpoint(
+            dirpath=args.checkpoint,  
+            filename="checkpoint-{epoch:02d}-{val_accuracy:.2f}",  
+            save_top_k=3, 
+            monitor="val_accuracy", 
+            mode="max"  
+        )
+        callbacks.append(checkpoint_callback)
         
     if trial is not None :   # if 'trial' is passed in, assume we are using Optuna to do HPO        
         targs['logger'] = CSVLogger(args.outdir, name=args.experiment)
@@ -358,7 +366,7 @@ def objective(args, trial):
     l = trial.suggest_categorical('layers', ['1', '2', '3', '4'])  
     args.layers = get_layers(l)
 
-    args.outdir = os.path.join(args.working_dir, "logs")
+    args.outdir = os.path.join(args.working_dir, "logs")   ### outdir referrenced here 
     args.experiment = f"trial_{trial.number:04d}"
 
     train_loader, val_loader, model = _get_loaders_and_model(args)
@@ -395,7 +403,6 @@ def tune(argv=None):
 
     obj = partial(objective, args)
 
-    # NOTE: I have changed the position of keyword: 'maximise'
     study = optuna.create_study(storage=f"sqlite:///{db}", study_name="study", load_if_exists=True, direction="maximize")
 
     study.optimize(obj, n_trials=args.n_trials)
