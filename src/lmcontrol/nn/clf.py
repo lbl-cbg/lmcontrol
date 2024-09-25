@@ -32,7 +32,7 @@ from ..utils import get_logger
 from .dataset import LMDataset, get_transforms as _get_transforms
 from lmcontrol.nn.resnet import _resnet  
 
-def resnet(*, weights=None, progress=True, block=None, layers=None, planes=None,num_classes=None) :
+def resnet(*, weights=None, progress=True, block=None, layers=None, planes=None,num_classes=None, no_classifier=None) :
     """ResNet-18 from `Deep Residual Learning for Image Recognition <https://arxiv.org/abs/1512.03385>`__.
 
     Args:
@@ -51,7 +51,7 @@ def resnet(*, weights=None, progress=True, block=None, layers=None, planes=None,
     .. autoclass:: torchvision.models.ResNet18_Weights
         :members:
     """
-    return _resnet(block=block, layers=layers, planes=planes, num_classes=num_classes, weights=weights, progress=progress)
+    return _resnet(block=block, layers=layers, planes=planes, num_classes=num_classes, weights=weights, progress=progress, no_classifier=no_classifier)
 
 def encode_labels(labels, return_classes=True):
     """This is a wrapper for sklearn.preprocessing.LabelEncoder"""
@@ -173,13 +173,13 @@ class LightningResNet(L.LightningModule):
     val_metric = "validation_ncs"
     train_metric = "train_ncs"
 
-    def __init__(self, num_classes, lr=0.01, step_size=2, gamma=0.1, planes=[8, 16, 32, 64], layers=[1, 1, 1, 1], block=BasicBlock):
+    def __init__(self, num_classes, lr=0.01, step_size=2, gamma=0.1, planes=[8, 16, 32, 64], layers=[1, 1, 1, 1], block=BasicBlock, no_classifier=False):
         super().__init__()
 
         weights = None 
         progress = True
 
-        self.backbone = resnet(weights=None, progress=True, block=block, layers=layers, planes=planes,num_classes=num_classes) 
+        self.backbone = resnet(weights=None, progress=True, block=block, layers=layers, planes=planes,num_classes=num_classes, no_classifier=no_classifier) 
         self.criterion = nn.CrossEntropyLoss()
         self.save_hyperparameters()
         self.lr = lr
@@ -263,7 +263,7 @@ def _add_training_args(parser):
     parser.add_argument("--block", type=get_block, choices=['BasicBlock', 'Bottleneck'], help="type of block to use in the model", default='Bottleneck')
     parser.add_argument("--planes", type=get_planes, choices=['3', '4'], help="list of number of planes for each layer", default='4')
     parser.add_argument("--layers", type=get_layers, choices=['1', '2', '3', '4'], help="list of number of layers in each stage", default='4')
-
+    parser.add_argument("-nc", "--no_classifier", action='store_true', default=False, help="provide this if you don't want classifier, helpful in embeddings stuff")
 
 def _get_loaders_and_model(args,  logger=None):
     transform = get_transform()
@@ -293,7 +293,7 @@ def _get_loaders_and_model(args,  logger=None):
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, drop_last=True, num_workers=num_workers)
     val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, drop_last=True, num_workers=num_workers)
 
-    model = LightningResNet(num_classes=len(train_dataset.label_classes[0]),lr=args.lr, step_size=args.step_size, gamma=args.gamma, block=args.block, planes=args.planes, layers=args.layers)
+    model = LightningResNet(num_classes=len(train_dataset.label_classes[0]),lr=args.lr, step_size=args.step_size, gamma=args.gamma, block=args.block, planes=args.planes, layers=args.layers, no_classifier= args.no_classifier)
 
     return train_loader, val_loader, model
 
@@ -417,6 +417,7 @@ def predict(argv=None):
     parser.add_argument("-d", "--debug", action='store_true', help="run with a small dataset", default=False)
     parser.add_argument("-p", "--pred-only", action='store_true', default=False, help="only save predictions, otherwise save original image data and labels in output_npz")
     parser.add_argument("-n", "--data_size", type=int, help="number of samples to use from each class", default=None)
+    parser.add_argument("-nc", "--no_classifier", action='store_true', default=False, help="provide this if you don't want classifier, helpful in embeddings stuff")
 
 
     args = parser.parse_args(argv)
@@ -429,7 +430,7 @@ def predict(argv=None):
 
 
     logger.info(f"Loading predicting data: {len(predict_files)} files")
-    predict_dataset = LMDataset(predict_files, transform=transform, logger=logger, return_labels=True, label_types=args.labels,n=n)
+    predict_dataset = LMDataset(predict_files, transform=transform, logger=logger, return_labels=True, label_types=args.labels, n=n)
     for i in range(predict_dataset.labels.shape[1]):
         logger.info(predict_dataset.label_types[i] + " - " + str(torch.unique(predict_dataset.labels[:, i])) + str(predict_dataset.label_classes))
 
@@ -437,7 +438,7 @@ def predict(argv=None):
 
     predict_loader = DataLoader(predict_dataset, batch_size=32, shuffle=False, drop_last=False, num_workers=3)
 
-    model = LightningResNet.load_from_checkpoint(args.checkpoint)
+    model = LightningResNet.load_from_checkpoint(args.checkpoint, no_classifier= args.no_classifier)
     accelerator = "gpu" if torch.cuda.is_available() else "cpu"
     trainer = L.Trainer(devices=1, accelerator=accelerator)
 
@@ -447,23 +448,38 @@ def predict(argv=None):
 
     pred_labels = np.argmax(predictions, axis=1)  
 
-    if true_labels is not None: 
-        accuracy = accuracy_score(true_labels, pred_labels)
-        precision = precision_score(true_labels, pred_labels, average='weighted')
-        recall = recall_score(true_labels, pred_labels, average='weighted')
-        conf_matrix = confusion_matrix(true_labels, pred_labels)
+    if args.no_classifier:
+        logger.info("No classifier mode: Saving embeddings")
+        # Save only the embeddings (no predictions)
+        out_data = dict(embedding=predictions)
+        if true_labels is not None:
+            out_data['true_labels'] = true_labels
 
-        logger.info(f"Accuracy: {accuracy:.4f}")
-        logger.info(f"Precision: {precision:.4f}")
-        logger.info(f"Recall: {recall:.4f}")
-        logger.info(f"Confusion Matrix:\n{conf_matrix}")
+    else:
+        logger.info("Classifier mode: Saving predictions")
+        # Save predictions (class predictions)
+        pred_labels = np.argmax(predictions, axis=1)  # Predicted class labels
 
-    out_data = dict(predictions=predictions, true_labels=true_labels)  
+        # If true labels are available, calculate metrics
+        if true_labels is not None:
+            accuracy = accuracy_score(true_labels, pred_labels)
+            precision = precision_score(true_labels, pred_labels, average='weighted')
+            recall = recall_score(true_labels, pred_labels, average='weighted')
+            conf_matrix = confusion_matrix(true_labels, pred_labels)
 
-    true_labels = np.array(true_labels)
-    pred_labels = np.array(pred_labels)
-    correct_incorrect = np.where(pred_labels == true_labels ,1 ,0) 
-    out_data = dict(predictions = predictions, true_labels = true_labels, pred_labels = pred_labels, correct_incorrect = correct_incorrect)
+            logger.info(f"Accuracy: {accuracy:.4f}")
+            logger.info(f"Precision: {precision:.4f}")
+            logger.info(f"Recall: {recall:.4f}")
+            logger.info(f"Confusion Matrix:\n{conf_matrix}")
+
+            # Save predictions and metrics
+            out_data = dict(predictions=predictions, true_labels=true_labels, pred_labels=pred_labels)
+            correct_incorrect = np.where(pred_labels == true_labels, 1, 0)
+            out_data['correct_incorrect'] = correct_incorrect
+
+        else:
+            # Save predictions without true labels
+            out_data = dict(predictions=predictions, pred_labels=pred_labels)
 
     if not args.pred_only:
         dset = predict_dataset
