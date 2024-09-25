@@ -25,6 +25,7 @@ class ResNet(nn.Module):
         width_per_group: int = 64,
         replace_stride_with_dilation: Optional[List[bool]] = None,
         norm_layer: Optional[Callable[..., nn.Module]] = None,
+        no_classifier: bool = False
     ) -> None:
         super().__init__()
         _log_api_usage_once(self)
@@ -69,8 +70,10 @@ class ResNet(nn.Module):
         idx = max(i for i in range(len(layers)) if layers[i] != 0)
         n_features = planes[idx] * expansion[idx]
 
-        self.fc = nn.Linear(n_features, num_classes)
-
+        if not no_classifier:
+            self.fc = nn.Linear(n_features, num_classes)
+        else:
+            self.fc = None
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -149,7 +152,9 @@ class ResNet(nn.Module):
 
         x = self.avgpool(x)
         x = torch.flatten(x, 1)
-        x = self.fc(x)
+
+        if self.fc is not None:
+            x = self.fc(x)
 
         return x
 
@@ -163,12 +168,13 @@ def _resnet(
     num_classes: int,
     weights: Optional[WeightsEnum],
     progress: bool,
+    no_classifier: bool = False,
     **kwargs: Any,
 ) -> ResNet:
     if weights is not None:
         _ovewrite_named_param(kwargs, "num_classes", len(weights.meta["categories"]))
         
-    model = ResNet(block=block, layers=layers, planes=planes, num_classes=num_classes)
+    model = ResNet(block=block, layers=layers, planes=planes, num_classes=num_classes, no_classifier=no_classifier)
 
     if weights is not None:
         model.load_state_dict(weights.get_state_dict(progress=progress, check_hash=True))
