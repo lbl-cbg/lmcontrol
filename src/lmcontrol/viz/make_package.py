@@ -16,7 +16,6 @@ with warnings.catch_warnings():
 from ..utils import get_logger
 from ..data_utils import encode_labels, load_npzs
 
-
 def compute_embedding(data, logger, metric='euclidean', two_d=False, center_images=False):
     ncomp = 2 if two_d else 3
     if center_images:
@@ -81,9 +80,9 @@ def main(argv=None):
             kwargs['Prediction_labels'] = correct_incorrect.astype(int)
             kwargs['Prediction_labels_readable_labels'] = ['Correct' if label == 1 else 'Incorrect' for label in correct_incorrect]
     else:
-        masks, images, paths, metadata = load_npzs(args.npzs, logger)
+        images, metadata, embedding = load_npzs(args.npzs, logger)
         kwargs = prepare_labels(metadata)
-        data = images
+        data = embedding
         if args.masks:
             data = masks
             metric = 'jaccard'
@@ -94,7 +93,7 @@ def main(argv=None):
     logger.info(f"Saving embeddings, images, and metadata to {args.out_npz}", )
     np.savez(args.out_npz, images=images, embedding=emb, **kwargs)
 
-
+ 
 if __name__ == "__main__":
     main()
 
