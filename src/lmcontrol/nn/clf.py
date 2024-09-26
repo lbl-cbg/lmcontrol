@@ -108,13 +108,12 @@ def load_npzs(npzs, logger, n=None, label_types=None):
         if len(metadata[k]) != target_len:
             logger.critical(f"Metadata '{k}' not found in all NPZ files")
             raise ValueError(f"Metadata '{k}' length mismatch: expected {target_len}, got {len(metadata[k])}")
-
     return masks, images, paths, metadata
 
 
 class LMDataset(Dataset):
 
-    def __init__(self, npzs, use_masks=False, return_labels=False, logger=None, transform=None, label_types=None,n=None):
+    def __init__(self, npzs, use_masks=False, return_labels=False, logger=None, transform=None, label_types=None, n=None, no_classifier=None):
         """
         Args:
             npzs (array-like)       : A list or tuple of paths to NPZ files containing cropped images
@@ -124,6 +123,7 @@ class LMDataset(Dataset):
         elif len(npzs) == 0:
             raise ValueError("Got empty array-like for argument 'npzs'")
         logger = logger or get_logger('warning')
+
         masks, images, paths, metadata = load_npzs(npzs, logger,n,label_types)
         if use_masks:
             self.data = masks
@@ -133,8 +133,9 @@ class LMDataset(Dataset):
         self.paths = tuple(paths)
         self.transform = transform
 
-        if not isinstance(label_types, (tuple, list)):
-            label_types = [label_types]
+        if not no_classifier:
+            if not isinstance(label_types, (tuple, list)):  ##### This is something we added for the clf part, refer Dataset class in main branch 
+                label_types = [label_types]
 
         self.labels = None
         self.label_classes = None
@@ -144,8 +145,9 @@ class LMDataset(Dataset):
             self.label_classes = list()
             self.label_types = list()
             for k in metadata:
-                if k not in label_types:
-                    continue
+                if not no_classifier:            #this line added new 
+                    if k not in label_types:
+                        continue
                 self.label_types.append(k)
                 labels, classes = encode_labels(metadata[k])
                 self.label_classes.append(classes)
@@ -277,14 +279,14 @@ def _get_loaders_and_model(args,  logger=None):
         logger = get_logger("critical")
 
     logger.info(f"Loading training data: {len(train_files)} files")
-    train_dataset = LMDataset(train_files, transform=transform, logger=logger, return_labels=True, label_types=args.labels,n=n)
+    train_dataset = LMDataset(train_files, transform=transform, logger=logger, return_labels=True, label_types=args.labels, n=n, no_classifier=args.no_classifier)
 
     for i in range(train_dataset.labels.shape[1]):
             logger.info(train_dataset.label_types[i] + " - " + str(torch.unique(train_dataset.labels[:, i])) + str(train_dataset.label_classes))
 
 
     logger.info(f"Loading validation data: {len(val_files)} files")
-    val_dataset = LMDataset(val_files, transform=transform, logger=logger, return_labels=True, label_types=args.labels,n=n)
+    val_dataset = LMDataset(val_files, transform=transform, logger=logger, return_labels=True, label_types=args.labels, n=n, no_classifier=args.no_classifier)
     for i in range(val_dataset.labels.shape[1]):
         logger.info(val_dataset.label_types[i] + " - " + str(torch.unique(val_dataset.labels[:, i])) + str(val_dataset.label_classes))
 
@@ -419,7 +421,6 @@ def predict(argv=None):
     parser.add_argument("-n", "--data_size", type=int, help="number of samples to use from each class", default=None)
     parser.add_argument("-nc", "--no_classifier", action='store_true', default=False, help="provide this if you don't want classifier, helpful in embeddings stuff")
 
-
     args = parser.parse_args(argv)
 
     logger = get_logger('info')
@@ -430,7 +431,7 @@ def predict(argv=None):
 
 
     logger.info(f"Loading predicting data: {len(predict_files)} files")
-    predict_dataset = LMDataset(predict_files, transform=transform, logger=logger, return_labels=True, label_types=args.labels, n=n)
+    predict_dataset = LMDataset(predict_files, transform=transform, logger=logger, return_labels=True, label_types=args.labels, n=n, no_classifier=args.no_classifier)
     for i in range(predict_dataset.labels.shape[1]):
         logger.info(predict_dataset.label_types[i] + " - " + str(torch.unique(predict_dataset.labels[:, i])) + str(predict_dataset.label_classes))
 
@@ -450,17 +451,13 @@ def predict(argv=None):
 
     if args.no_classifier:
         logger.info("No classifier mode: Saving embeddings")
-        # Save only the embeddings (no predictions)
-        out_data = dict(embedding=predictions)
-        if true_labels is not None:
-            out_data['true_labels'] = true_labels
-
+        out_data = dict(predictions=predictions) #replace embedding with prediction
+        label_types=None
+   #REMOVE true_labels and check why isn;t feed and ht coming in like time does
     else:
         logger.info("Classifier mode: Saving predictions")
-        # Save predictions (class predictions)
-        pred_labels = np.argmax(predictions, axis=1)  # Predicted class labels
+        pred_labels = np.argmax(predictions, axis=1)  
 
-        # If true labels are available, calculate metrics
         if true_labels is not None:
             accuracy = accuracy_score(true_labels, pred_labels)
             precision = precision_score(true_labels, pred_labels, average='weighted')
@@ -472,17 +469,15 @@ def predict(argv=None):
             logger.info(f"Recall: {recall:.4f}")
             logger.info(f"Confusion Matrix:\n{conf_matrix}")
 
-            # Save predictions and metrics
             out_data = dict(predictions=predictions, true_labels=true_labels, pred_labels=pred_labels)
             correct_incorrect = np.where(pred_labels == true_labels, 1, 0)
             out_data['correct_incorrect'] = correct_incorrect
 
         else:
-            # Save predictions without true labels
             out_data = dict(predictions=predictions, pred_labels=pred_labels)
 
     if not args.pred_only:
-        dset = predict_dataset
+        dset = predict_dataset   
         out_data['images'] = np.asarray(torch.squeeze(dset.data))
         for i, k in enumerate(dset.label_types):
             out_data[k + "_classes"] = dset.label_classes[i]
