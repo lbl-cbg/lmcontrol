@@ -114,7 +114,7 @@ def load_npzs(npzs, logger, n=None, label_types=None):
 
 class LMDataset(Dataset):
 
-    def __init__(self, npzs, use_masks=False, return_labels=False, logger=None, transform=None, label_types=None, n=None, no_classifier=None, split=None, split_ratio=None, ambr03=None):
+    def __init__(self, npzs, use_masks=False, return_labels=False, logger=None, transform=None, label_types=None, n=None, no_classifier=None, split=None, val_size=None, seed=None):
         """
         Args:
             npzs (array-like)       : A list or tuple of paths to NPZ files containing cropped images
@@ -135,7 +135,7 @@ class LMDataset(Dataset):
         self.transform = transform
 
         if not no_classifier:
-            if not isinstance(label_types, (tuple, list)):  ##### This is something we added for the clf part, refer Dataset class in main branch 
+            if not isinstance(label_types, (tuple, list)):
                 label_types = [label_types]
 
         self.labels = None
@@ -147,7 +147,7 @@ class LMDataset(Dataset):
             self.label_classes = list()
             self.label_types = list()
             for k in metadata:
-                if not no_classifier:            #this line added new 
+                if not no_classifier:           
                     if k not in label_types:
                         continue
                 self.label_types.append(k)
@@ -156,21 +156,17 @@ class LMDataset(Dataset):
                 tmp.append(labels)
             self.labels = torch.from_numpy(np.stack(tmp, axis=1))
         
-        if ambr03:
-            self._split_data(split, split_ratio)
+        if val_size:
+            self._split_data(split, val_size, seed)
 
 
-    def _split_data(self, split, split_ratio):
+    def _split_data(self, split, val_size, seed):
 
         num_samples = len(self.data)
         indices = np.arange(num_samples)
-        
-        train_size = split_ratio
-        val_size = 1 - train_size  
+    
+        train_indices, val_indices = train_test_split(indices, test_size=val_size, random_state=seed, stratify=self.labels)
 
-        train_indices, val_indices = train_test_split(
-            indices, train_size=train_size, stratify=self.labels
-        )
         if split == 'train':
             self.data = self.data[train_indices]
             if self.labels is not None:
@@ -277,14 +273,19 @@ def get_layers(layers_cmd):
 def _add_training_args(parser):
     parser.add_argument('labels', type=str, help="the label to train with") #Let us currently only work with single label. We will add other labels in future (Andrew)
     parser.add_argument("--training", type=str, nargs='+', required=True, help="directories containing training data")
-    parser.add_argument("--validation", type=str, nargs='+', required=True, help="directories containing validation data")
+
+    grp = parser.add_mutually_exclusive_group()
+    grp.add_argument("--validation", type=str, nargs='+', help="directories containing validation data")
+    grp.add_argument("--val_frac", type=float, default=None, help="Part of data to use for training (between 0 and 1)")
+
+    parser.add_argument("--seed", type=int)
     parser.add_argument("-c","--checkpoint", type=str, help="path to the model checkpoint file to use for inference")
     parser.add_argument("-e", "--epochs", type=int, help="the number of epochs to run for", default=10)
     parser.add_argument("-d", "--debug", action='store_true', help="run with a small dataset", default=False)
     parser.add_argument("-o", "--outdir", type=str, help="the directory to save output to", default='.')
     parser.add_argument("-n", "--n_samples", type=int, help="number of samples to use from each NPZ", default=None)
     parser.add_argument("--early_stopping", action='store_true', help="enable early stopping", default=False)
-    parser.add_argument("--lr", type=float, help="learning rate", default=0.001)                                # Added extra (in the follwoing lines of parsing )
+    parser.add_argument("--lr", type=float, help="learning rate", default=0.001)                               
     parser.add_argument("--step_size", type=int, help="step size for learning rate scheduler", default=10)
     parser.add_argument("--gamma", type=float, help="gamma for learning rate scheduler", default=0.1)
     parser.add_argument("--batch_size", type=int, help="batch size for training and validation", default=32)
@@ -292,33 +293,31 @@ def _add_training_args(parser):
     parser.add_argument("--planes", type=get_planes, choices=['3', '4'], help="list of number of planes for each layer", default='4')
     parser.add_argument("--layers", type=get_layers, choices=['1', '2', '3', '4'], help="list of number of layers in each stage", default='4')
     parser.add_argument("-nc", "--no_classifier", action='store_true', default=False, help="provide this if you don't want classifier, helpful in embeddings stuff")
-    parser.add_argument("-ambr03", "--ambr03", action='store_true', default=False, help="provide this if you are going to use ambr03")
-    parser.add_argument("--ambr_03_train_validate", type=str, nargs='+', required=True, help="directories containing ambr03 training and validation data")
-    parser.add_argument("--split_ratio", type=float, default=0.8, help="Part of data to use for training (between 0 and 1)")
 
 def _get_loaders_and_model(args,  logger=None):
-    transform = get_transform()
-
-    if args.ambr03:
-        ambr03_files = args.ambr_03_train_validate
+    transform = get_transform()                                                         
+                                                                                             
+    if args.val_frac:
+        split_files = args.training
         
         n = args.n_samples
 
         if logger is None:
             logger = get_logger("critical")
 
-        logger.info(f"Loading training data from: {len(ambr03_files)} files")
-        train_dataset = LMDataset(ambr03_files, transform=transform, logger=logger, return_labels=True, label_types=args.labels, n=n, no_classifier=args.no_classifier, split='train', split_ratio=args.split_ratio, ambr03=args.ambr03)
+        logger.info(f"Loading training data from: {len(split_files)} files")
+        train_dataset = LMDataset(split_files, transform=transform, logger=logger, return_labels=True, label_types=args.labels, n=n, no_classifier=args.no_classifier, split='train', val_size=args.val_frac, seed=args.seed)
 
         for i in range(train_dataset.labels.shape[1]):
                 logger.info(train_dataset.label_types[i] + " - " + str(torch.unique(train_dataset.labels[:, i])) + str(train_dataset.label_classes))
 
 
-        logger.info(f"Loading validation data from: {len(ambr03_files)} files")
-        val_dataset = LMDataset(ambr03_files, transform=transform, logger=logger, return_labels=True, label_types=args.labels, n=n, no_classifier=args.no_classifier, split='validate', split_ratio=args.split_ratio, ambr03=args.ambr03)
+        logger.info(f"Loading validation data from: {len(split_files)} files")
+        val_dataset = LMDataset(split_files, transform=transform, logger=logger, return_labels=True, label_types=args.labels, n=n, no_classifier=args.no_classifier, split='validate', val_size=args.val_frac, seed=args.seed)
         for i in range(val_dataset.labels.shape[1]):
             logger.info(val_dataset.label_types[i] + " - " + str(torch.unique(val_dataset.labels[:, i])) + str(val_dataset.label_classes))
-    else:
+
+    elif args.validation:
         train_files = args.training
         val_files = args.validation
 
@@ -338,6 +337,10 @@ def _get_loaders_and_model(args,  logger=None):
         val_dataset = LMDataset(val_files, transform=transform, logger=logger, return_labels=True, label_types=args.labels, n=n, no_classifier=args.no_classifier)
         for i in range(val_dataset.labels.shape[1]):
             logger.info(val_dataset.label_types[i] + " - " + str(torch.unique(val_dataset.labels[:, i])) + str(val_dataset.label_classes))
+
+    else:
+        print("You must specify --validation or --val_frac", file=sys.sterr)
+        exit(1)
 
     num_workers = 0 if args.debug else 4
 
@@ -469,33 +472,21 @@ def predict(argv=None):
     parser.add_argument("-p", "--pred-only", action='store_true', default=False, help="only save predictions, otherwise save original image data and labels in output_npz")
     parser.add_argument("-n", "--data_size", type=int, help="number of samples to use from each class", default=None)
     parser.add_argument("-nc", "--no_classifier", action='store_true', default=False, help="provide this if you don't want classifier, helpful in embeddings stuff")
-    parser.add_argument("-ambr03", "--ambr03", action='store_true', default=False, help="provide this if you are going to use ambr03")
-    parser.add_argument("--ambr_03_prediction", type=str, nargs='+', required=True, help="directories containing ambr03 prediction data")
+
 
     args = parser.parse_args(argv)
 
     logger = get_logger('info')
     transform = get_transform()
 
-    if args.ambr03:
-        predict_files = args.ambr_03_prediction 
+    predict_files = args.prediction
 
-        n = args.data_size
+    n = args.data_size
 
-        logger.info(f"Loading predicting data: {len(predict_files)} files")
-        predict_dataset = LMDataset(predict_files, transform=transform, logger=logger, return_labels=True, label_types=args.labels, n=n, no_classifier=args.no_classifier)
-        for i in range(predict_dataset.labels.shape[1]):
-            logger.info(predict_dataset.label_types[i] + " - " + str(torch.unique(predict_dataset.labels[:, i])) + str(predict_dataset.label_classes))
-
-    else:
-        predict_files = args.prediction
-
-        n = args.data_size
-
-        logger.info(f"Loading predicting data: {len(predict_files)} files")
-        predict_dataset = LMDataset(predict_files, transform=transform, logger=logger, return_labels=True, label_types=args.labels, n=n, no_classifier=args.no_classifier)
-        for i in range(predict_dataset.labels.shape[1]):
-            logger.info(predict_dataset.label_types[i] + " - " + str(torch.unique(predict_dataset.labels[:, i])) + str(predict_dataset.label_classes))
+    logger.info(f"Loading predicting data: {len(predict_files)} files")
+    predict_dataset = LMDataset(predict_files, transform=transform, logger=logger, return_labels=True, label_types=args.labels, n=n, no_classifier=args.no_classifier)
+    for i in range(predict_dataset.labels.shape[1]):
+        logger.info(predict_dataset.label_types[i] + " - " + str(torch.unique(predict_dataset.labels[:, i])) + str(predict_dataset.label_classes))
 
     true_labels = predict_dataset.labels[:, 0]  
 
@@ -513,9 +504,8 @@ def predict(argv=None):
 
     if args.no_classifier:
         logger.info("No classifier mode: Saving embeddings")
-        out_data = dict(predictions=predictions) #replace embedding with prediction
+        out_data = dict(predictions=predictions) 
         label_types=None
-   #REMOVE true_labels and check why isn;t feed and ht coming in like time does
     else:
         logger.info("Classifier mode: Saving predictions")
         pred_labels = np.argmax(predictions, axis=1)  
