@@ -50,6 +50,7 @@ class ResNet(nn.Module):
         self.bn1 = norm_layer(self.inplanes)
         self.relu = nn.ReLU(inplace=True)
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        self.no_classifier = no_classifier
 
         if planes is None:
             planes = [64, 128, 256, 512]
@@ -70,10 +71,7 @@ class ResNet(nn.Module):
         idx = max(i for i in range(len(layers)) if layers[i] != 0)
         n_features = planes[idx] * expansion[idx]
 
-        if not no_classifier:
-            self.fc = nn.Linear(n_features, num_classes)
-        else:
-            self.fc = None
+        self.fc = nn.Linear(n_features, num_classes)  #new added from above
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -153,7 +151,7 @@ class ResNet(nn.Module):
         x = self.avgpool(x)
         x = torch.flatten(x, 1)
 
-        if self.fc is not None:
+        if not self.no_classifier:
             x = self.fc(x)
 
         return x
