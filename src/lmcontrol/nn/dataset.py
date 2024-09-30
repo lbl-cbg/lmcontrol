@@ -66,7 +66,7 @@ class Norm(T._transform.Transform):
 
 class LMDataset(Dataset):
 
-    def __init__(self, npzs, use_masks=False, return_labels=False, logger=None, transform=None, label_types=None,n=None):
+    def __init__(self, npzs, use_masks=False, return_labels=False, logger=None, transform=None, label_types=None, n=None, no_classifier=None, split=None, val_size=None, seed=None):
         """
         Args:
             npzs (array-like)       : A list or tuple of paths to NPZ files containing cropped images
@@ -76,6 +76,7 @@ class LMDataset(Dataset):
         elif len(npzs) == 0:
             raise ValueError("Got empty array-like for argument 'npzs'")
         logger = logger or get_logger('warning')
+
         masks, images, paths, metadata = load_npzs(npzs, logger,n,label_types)
         if use_masks:
             self.data = masks
@@ -85,24 +86,47 @@ class LMDataset(Dataset):
         self.paths = tuple(paths)
         self.transform = transform
 
-        if not isinstance(label_types, (tuple, list)):
-            label_types = [label_types]
+        if not no_classifier:
+            if not isinstance(label_types, (tuple, list)):
+                label_types = [label_types]
 
         self.labels = None
         self.label_classes = None
         self.label_types = None
+
         if return_labels:
             tmp = list()
             self.label_classes = list()
             self.label_types = list()
             for k in metadata:
-                if k not in label_types:
-                    continue
+                if not no_classifier:           
+                    if k not in label_types:
+                        continue
                 self.label_types.append(k)
                 labels, classes = encode_labels(metadata[k])
                 self.label_classes.append(classes)
                 tmp.append(labels)
             self.labels = torch.from_numpy(np.stack(tmp, axis=1))
+        
+        if val_size:
+            self._split_data(split, val_size, seed)
+
+
+    def _split_data(self, split, val_size, seed):
+
+        num_samples = len(self.data)
+        indices = np.arange(num_samples)
+    
+        train_indices, val_indices = train_test_split(indices, test_size=val_size, random_state=seed, stratify=self.labels)
+
+        if split == 'train':
+            self.data = self.data[train_indices]
+            if self.labels is not None:
+                self.labels = self.labels[train_indices]
+        elif split == 'validate':
+            self.data = self.data[val_indices]
+            if self.labels is not None:
+                self.labels = self.labels[val_indices]
 
     def __getitem__(self, i):
         ret = self.data[i]
