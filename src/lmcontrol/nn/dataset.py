@@ -5,6 +5,7 @@ from lightly.data import LightlyDataset
 import torch
 from torch.utils.data import Dataset
 import torchvision.transforms.v2 as T
+from sklearn.model_selection import train_test_split
 
 
 from ..data_utils import encode_labels, load_npzs

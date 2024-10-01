@@ -54,7 +54,7 @@ class ResNet(nn.Module):
 
         if planes is None:
             planes = [64, 128, 256, 512]
-
+            
         self.layer1 = self._make_layer(block, planes[0], layers[0])
         self.layer2 = self._make_layer(block, planes[1], layers[1], stride=2, dilate=replace_stride_with_dilation[0])
         self.layer3 = self._make_layer(block, planes[2], layers[2], stride=2, dilate=replace_stride_with_dilation[1])
