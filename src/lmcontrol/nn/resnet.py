@@ -25,7 +25,7 @@ class ResNet(nn.Module):
         width_per_group: int = 64,
         replace_stride_with_dilation: Optional[List[bool]] = None,
         norm_layer: Optional[Callable[..., nn.Module]] = None,
-        no_classifier: bool = False
+        save_embeddings: bool = False
     ) -> None:
         super().__init__()
         _log_api_usage_once(self)
@@ -50,7 +50,7 @@ class ResNet(nn.Module):
         self.bn1 = norm_layer(self.inplanes)
         self.relu = nn.ReLU(inplace=True)
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-        self.no_classifier = no_classifier
+        self.return_embeddings = save_embeddings
 
         if planes is None:
             planes = [64, 128, 256, 512]
@@ -151,7 +151,7 @@ class ResNet(nn.Module):
         x = self.avgpool(x)
         x = torch.flatten(x, 1)
 
-        if not self.no_classifier:
+        if not self.return_embeddings:
             x = self.fc(x)
 
         return x
@@ -166,13 +166,13 @@ def _resnet(
     num_classes: int,
     weights: Optional[WeightsEnum],
     progress: bool,
-    no_classifier: bool = False,
+    save_embeddings: bool = False,
     **kwargs: Any,
 ) -> ResNet:
     if weights is not None:
         _ovewrite_named_param(kwargs, "num_classes", len(weights.meta["categories"]))
         
-    model = ResNet(block=block, layers=layers, planes=planes, num_classes=num_classes, no_classifier=no_classifier)
+    model = ResNet(block=block, layers=layers, planes=planes, num_classes=num_classes, save_embeddings=save_embeddings)
 
     if weights is not None:
         model.load_state_dict(weights.get_state_dict(progress=progress, check_hash=True))
