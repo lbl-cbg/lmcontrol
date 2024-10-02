@@ -34,7 +34,7 @@ from ..data_utils import load_npzs, encode_labels
 from .dataset import LMDataset, get_transforms as _get_transforms
 from lmcontrol.nn.resnet import _resnet  
 
-def resnet(*, weights=None, progress=True, block=None, layers=None, planes=None,num_classes=None, no_classifier=None) :
+def resnet(*, weights=None, progress=True, block=None, layers=None, planes=None,num_classes=None, save_embeddings=None) :
     """ResNet-18 from `Deep Residual Learning for Image Recognition <https://arxiv.org/abs/1512.03385>`__.
 
     Args:
@@ -53,7 +53,7 @@ def resnet(*, weights=None, progress=True, block=None, layers=None, planes=None,
     .. autoclass:: torchvision.models.ResNet18_Weights
         :members:
     """
-    return _resnet(block=block, layers=layers, planes=planes, num_classes=num_classes, weights=weights, progress=progress, no_classifier=no_classifier)
+    return _resnet(block=block, layers=layers, planes=planes, num_classes=num_classes, weights=weights, progress=progress, save_embeddings=save_embeddings)
 
 
 class LightningResNet(L.LightningModule):
@@ -61,13 +61,13 @@ class LightningResNet(L.LightningModule):
     val_metric = "validation_ncs"
     train_metric = "train_ncs"
 
-    def __init__(self, num_classes, lr=0.01, step_size=2, gamma=0.1, planes=[8, 16, 32, 64], layers=[1, 1, 1, 1], block=BasicBlock, no_classifier=False):
+    def __init__(self, num_classes, lr=0.01, step_size=2, gamma=0.1, planes=[8, 16, 32, 64], layers=[1, 1, 1, 1], block=BasicBlock, save_embeddings=False):
         super().__init__()
 
         weights = None 
         progress = True
 
-        self.backbone = resnet(weights=None, progress=True, block=block, layers=layers, planes=planes,num_classes=num_classes, no_classifier=no_classifier) 
+        self.backbone = resnet(weights=None, progress=True, block=block, layers=layers, planes=planes,num_classes=num_classes, save_embeddings=save_embeddings) 
         self.criterion = nn.CrossEntropyLoss()
         self.save_hyperparameters()
         self.lr = lr
@@ -149,6 +149,7 @@ def _add_training_args(parser):
     parser.add_argument("-o", "--outdir", type=str, help="the directory to save output to", default='.')
     parser.add_argument("-n", "--n_samples", type=int, help="number of samples to use from each NPZ", default=None)
     parser.add_argument("--early_stopping", action='store_true', help="enable early stopping", default=False)
+    parser.add_argument("-stop_wandb", "--stop_wandb", action='store_false', default=True, help="provide this flag to stop wandb")
     parser.add_argument("--lr", type=float, help="learning rate", default=0.001)                               
     parser.add_argument("--step_size", type=int, help="step size for learning rate scheduler", default=10)
     parser.add_argument("--gamma", type=float, help="gamma for learning rate scheduler", default=0.1)
@@ -156,7 +157,7 @@ def _add_training_args(parser):
     parser.add_argument("--block", type=get_block, choices=['BasicBlock', 'Bottleneck'], help="type of block to use in the model", default='Bottleneck')
     parser.add_argument("--planes", type=get_planes, choices=['3', '4'], help="list of number of planes for each layer", default='4')
     parser.add_argument("--layers", type=get_layers, choices=['1', '2', '3', '4'], help="list of number of layers in each stage", default='4')
-    parser.add_argument("-nc", "--no_classifier", action='store_true', default=False, help="provide this if you don't want classifier, helpful in embeddings stuff")
+    parser.add_argument("-save_emb", "--save_embeddings", action='store_true', default=False, help="saves embeddings, used for plotly/dash")
 
 def _get_loaders_and_model(args,  logger=None):
     transform = get_transform()                                                         
@@ -170,14 +171,14 @@ def _get_loaders_and_model(args,  logger=None):
             logger = get_logger("critical")
 
         logger.info(f"Loading training data from: {len(split_files)} files")
-        train_dataset = LMDataset(split_files, transform=transform, logger=logger, return_labels=True, label_types=args.labels, n=n, no_classifier=args.no_classifier, split='train', val_size=args.val_frac, seed=args.seed)
+        train_dataset = LMDataset(split_files, transform=transform, logger=logger, return_labels=True, label_types=args.labels, n=n, save_embeddings=args.save_embeddings, split='train', val_size=args.val_frac, seed=args.seed)
 
         for i in range(train_dataset.labels.shape[1]):
                 logger.info(train_dataset.label_types[i] + " - " + str(torch.unique(train_dataset.labels[:, i])) + str(train_dataset.label_classes))
 
 
         logger.info(f"Loading validation data from: {len(split_files)} files")
-        val_dataset = LMDataset(split_files, transform=transform, logger=logger, return_labels=True, label_types=args.labels, n=n, no_classifier=args.no_classifier, split='validate', val_size=args.val_frac, seed=args.seed)
+        val_dataset = LMDataset(split_files, transform=transform, logger=logger, return_labels=True, label_types=args.labels, n=n, save_embeddings=args.save_embeddings, split='validate', val_size=args.val_frac, seed=args.seed)
         for i in range(val_dataset.labels.shape[1]):
             logger.info(val_dataset.label_types[i] + " - " + str(torch.unique(val_dataset.labels[:, i])) + str(val_dataset.label_classes))
 
@@ -191,14 +192,14 @@ def _get_loaders_and_model(args,  logger=None):
             logger = get_logger("critical")
 
         logger.info(f"Loading training data: {len(train_files)} files")
-        train_dataset = LMDataset(train_files, transform=transform, logger=logger, return_labels=True, label_types=args.labels, n=n, no_classifier=args.no_classifier)
+        train_dataset = LMDataset(train_files, transform=transform, logger=logger, return_labels=True, label_types=args.labels, n=n, save_embeddings=args.save_embeddings)
 
         for i in range(train_dataset.labels.shape[1]):
                 logger.info(train_dataset.label_types[i] + " - " + str(torch.unique(train_dataset.labels[:, i])) + str(train_dataset.label_classes))
 
 
         logger.info(f"Loading validation data: {len(val_files)} files")
-        val_dataset = LMDataset(val_files, transform=transform, logger=logger, return_labels=True, label_types=args.labels, n=n, no_classifier=args.no_classifier)
+        val_dataset = LMDataset(val_files, transform=transform, logger=logger, return_labels=True, label_types=args.labels, n=n, save_embeddings=args.save_embeddings)
         for i in range(val_dataset.labels.shape[1]):
             logger.info(val_dataset.label_types[i] + " - " + str(torch.unique(val_dataset.labels[:, i])) + str(val_dataset.label_classes))
 
@@ -211,7 +212,7 @@ def _get_loaders_and_model(args,  logger=None):
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, drop_last=True, num_workers=num_workers)
     val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, drop_last=True, num_workers=num_workers)
 
-    model = LightningResNet(num_classes=len(train_dataset.label_classes[0]),lr=args.lr, step_size=args.step_size, gamma=args.gamma, block=args.block, planes=args.planes, layers=args.layers, no_classifier= args.no_classifier)
+    model = LightningResNet(num_classes=len(train_dataset.label_classes[0]),lr=args.lr, step_size=args.step_size, gamma=args.gamma, block=args.block, planes=args.planes, layers=args.layers, save_embeddings= args.save_embeddings)
 
     return train_loader, val_loader, model
 
@@ -236,7 +237,7 @@ def _get_trainer(args, trial=None):
     if args.checkpoint:
         checkpoint_callback = ModelCheckpoint(
             dirpath=args.checkpoint,  
-            filename="checkpoint-{epoch:02d}-{val_accuracy:.2f}",  
+            filename="checkpoint-{epoch:02d}-{val_accuracy:.4f}",  
             save_top_k=3, 
             monitor="val_accuracy", 
             mode="max"  
@@ -248,8 +249,9 @@ def _get_trainer(args, trial=None):
         if args.pruning:
             callbacks.append(PyTorchLightningPruningCallback(trial, monitor="val_accuracy"))
     else:
-        wandb.init(project="SX_HTY_Run1")
-        targs['logger'] = WandbLogger(project='your_project_name', log_model=True)
+        if args.stop_wandb:
+            wandb.init(project="SX_HTY_Run1")
+            targs['logger'] = WandbLogger(project='your_project_name', log_model=True)
 
     return L.Trainer(**targs)
 
@@ -335,8 +337,10 @@ def predict(argv=None):
     parser.add_argument("-d", "--debug", action='store_true', help="run with a small dataset", default=False)
     parser.add_argument("-p", "--pred-only", action='store_true', default=False, help="only save predictions, otherwise save original image data and labels in output_npz")
     parser.add_argument("-n", "--data_size", type=int, help="number of samples to use from each class", default=None)
-    parser.add_argument("-nc", "--no_classifier", action='store_true', default=False, help="provide this if you don't want classifier, helpful in embeddings stuff")
-
+    grp = parser.add_mutually_exclusive_group()
+    grp.add_argument("-save_emb", "--save_embeddings", action='store_true', default=False, help="provide this if you don't want classifier, helpful in embeddings stuff")
+    grp.add_argument("-save_misclassifed", "--save_misclassified", type=str, default=False, help="Directory to save the misclassified samples.")
+    parser.add_argument('-classes','--classes', type=str, nargs='+',default=None, help="List of class names.")
 
     args = parser.parse_args(argv)
 
@@ -348,7 +352,7 @@ def predict(argv=None):
     n = args.data_size
 
     logger.info(f"Loading predicting data: {len(predict_files)} files")
-    predict_dataset = LMDataset(predict_files, transform=transform, logger=logger, return_labels=True, label_types=args.labels, n=n, no_classifier=args.no_classifier)
+    predict_dataset = LMDataset(predict_files, transform=transform, logger=logger, return_labels=True, label_types=args.labels, n=n, save_embeddings=args.save_embeddings)
     for i in range(predict_dataset.labels.shape[1]):
         logger.info(predict_dataset.label_types[i] + " - " + str(torch.unique(predict_dataset.labels[:, i])) + str(predict_dataset.label_classes))
 
@@ -356,7 +360,7 @@ def predict(argv=None):
 
     predict_loader = DataLoader(predict_dataset, batch_size=32, shuffle=False, drop_last=False, num_workers=3)
 
-    model = LightningResNet.load_from_checkpoint(args.checkpoint, no_classifier= args.no_classifier)
+    model = LightningResNet.load_from_checkpoint(args.checkpoint, save_embeddings= args.save_embeddings)
     accelerator = "gpu" if torch.cuda.is_available() else "cpu"
     trainer = L.Trainer(devices=1, accelerator=accelerator)
 
@@ -366,7 +370,7 @@ def predict(argv=None):
 
     pred_labels = np.argmax(predictions, axis=1)  
 
-    if args.no_classifier:
+    if args.save_embeddings:
         logger.info("No classifier mode: Saving embeddings")
         out_data = dict(predictions=predictions) 
         label_types=None
@@ -402,9 +406,52 @@ def predict(argv=None):
   
     np.savez(args.output_npz, **out_data)
 
-#misclassify function can be added if needed 
+    if args.save_misclassified:
+        save_misclassified_samples(args.output_npz, args.save_misclassified, predict_dataset.label_classes[0])
 
-## merge this code with the optune branch ##
+""" 
+def 
+
+"""
+def save_misclassified_samples(prediction_file, save_misclassified, classes):
+
+    data = np.load(prediction_file)
+
+    predictions = data['predictions']
+    true_labels = data['true_labels']
+    pred_labels = data['pred_labels']
+    correct_incorrect = data['correct_incorrect']
+    images = data['images']
+
+    os.makedirs(save_misclassified, exist_ok=True)
+
+    class_mapping = {i: label for i, label in enumerate(classes)}
+
+    misclassified_indices = np.where(correct_incorrect == 0)[0]
+
+    unique_misclassifications = set(zip(true_labels[misclassified_indices], 
+                                        pred_labels[misclassified_indices]))
+
+    for true_label, pred_label in unique_misclassifications:
+        indices = np.where((true_labels == true_label) & 
+                           (pred_labels == pred_label) & 
+                           (correct_incorrect == 0))[0]
+
+        if len(indices) > 0:
+            true_label_name = classes[true_label]
+            pred_label_name = classes[pred_label]
+
+            npz_filename = os.path.join(save_misclassified, f"misclassified_{true_label_name}_as_{pred_label_name}.npz")
+
+            np.savez(npz_filename,
+                     images=images[indices],
+                     true_labels=true_labels[indices],
+                     pred_labels=pred_labels[indices],
+                     predictions=predictions[indices])
+
+            print(f"Saved {len(indices)} misclassified samples of class {true_label_name} predicted as {pred_label_name} to {npz_filename}")
+        else:
+            print(f"No misclassified samples of class {true_label_name} predicted as {pred_label_name}")
 
 if __name__ == '__main__':
     train()

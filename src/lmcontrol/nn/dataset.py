@@ -67,7 +67,7 @@ class Norm(T._transform.Transform):
 
 class LMDataset(Dataset):
 
-    def __init__(self, npzs, use_masks=False, return_labels=False, logger=None, transform=None, label_types=None, n=None, no_classifier=None, split=None, val_size=None, seed=None):
+    def __init__(self, npzs, use_masks=False, return_labels=False, logger=None, transform=None, label_types=None, n=None, save_embeddings=None, split=None, val_size=None, seed=None):
         """
         Args:
             npzs (array-like)       : A list or tuple of paths to NPZ files containing cropped images
@@ -87,9 +87,9 @@ class LMDataset(Dataset):
         self.paths = tuple(paths)
         self.transform = transform
 
-        if not no_classifier:
-            if not isinstance(label_types, (tuple, list)):
-                label_types = [label_types]
+
+        if not isinstance(label_types, (tuple, list)):
+            label_types = [label_types]
 
         self.labels = None
         self.label_classes = None
@@ -100,7 +100,7 @@ class LMDataset(Dataset):
             self.label_classes = list()
             self.label_types = list()
             for k in metadata:
-                if not no_classifier:           
+                if not save_embeddings:           
                     if k not in label_types:
                         continue
                 self.label_types.append(k)
