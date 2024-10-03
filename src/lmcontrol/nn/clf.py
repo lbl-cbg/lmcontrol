@@ -340,7 +340,6 @@ def predict(argv=None):
     parser.add_argument("-save_emb", "--save_embeddings", action='store_true', default=False, help="provide this if you don't want classifier, helpful in embeddings stuff")
     parser.add_argument("-save_misclassifed", "--save_misclassified", type=str, default=None, help="Directory to save the misclassified samples.")
     parser.add_argument("-save_confusion", "--save_confusion", type=str, default=None, help="Directory to save the confusion keys, which can be later used for plotly.")
-    parser.add_argument('-classes','--classes', type=str, nargs='+',default=None, help="List of class names.")
 
     args = parser.parse_args(argv)
 
@@ -406,20 +405,20 @@ def predict(argv=None):
   
     np.savez(args.output_npz, **out_data)
 
-    if args.save_misclassified is None and args.save_confusion is None:
-        print("Error: No directories provided for saving misclassified samples or confusion matrix.")
-    else:
-        if args.save_misclassified is not None or args.save_confusion is not None:
-            save_misclassified_samples(prediction_file=args.output_npz, 
-                                    save_misclassified=args.save_misclassified, 
-                                    save_confusion=args.save_confusion, 
-                                    classes=predict_dataset.label_classes[0])
+    if not args.save_embeddings:
+        if args.save_misclassified is None and args.save_confusion is None:
+            print("Error: No directories provided for saving misclassified samples or confusion matrix.")
+        else:
+            if args.save_misclassified is not None or args.save_confusion is not None:
+                save_misclassified_samples(prediction_file=args.output_npz, 
+                                        save_misclassified=args.save_misclassified, 
+                                        save_confusion=args.save_confusion, 
+                                        classes=predict_dataset.label_classes[0])
 
 
 
 
 def save_misclassified_samples(prediction_file=None, save_misclassified=None, save_confusion=None, classes=None):
-    # Load prediction data
     data = np.load(prediction_file)
 
     predictions = data['predictions']
@@ -428,21 +427,18 @@ def save_misclassified_samples(prediction_file=None, save_misclassified=None, sa
     correct_incorrect = data['correct_incorrect']
     images = data['images']
 
-    # Check if save_misclassified or save_confusion directories are provided
     if save_misclassified is None:
         print("Warning: No directory provided for saving misclassified samples. Skipping.")
-        save_misclassified = None  # Set to None to prevent further processing
+        save_misclassified = None  
     if save_confusion is None:
         print("Warning: No directory provided for saving confusion matrix. Skipping.")
-        save_confusion = None  # Set to None to prevent further processing
+        save_confusion = None  
 
-    # Ensure directories exist only if they are not None
     if save_misclassified and not os.path.exists(save_misclassified):
         os.makedirs(save_misclassified)
     if save_confusion and not os.path.exists(save_confusion):
         os.makedirs(save_confusion)
 
-    # Proceed only if save_misclassified is provided
     if save_misclassified:
         misclassified_indices = np.where(correct_incorrect == 0)[0]
         unique_misclassifications = set(zip(true_labels[misclassified_indices], pred_labels[misclassified_indices]))
@@ -468,7 +464,6 @@ def save_misclassified_samples(prediction_file=None, save_misclassified=None, sa
             else:
                 print(f"No misclassified samples of class {true_label_name} predicted as {pred_label_name}")
 
-    # Proceed with confusion matrix saving if provided
     if save_confusion:
         confusion_keys = [f"{true}->{pred}" for true in classes for pred in classes]
         encoder = LabelEncoder()
