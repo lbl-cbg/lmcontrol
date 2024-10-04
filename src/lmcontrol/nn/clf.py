@@ -115,9 +115,9 @@ class LightningResNet(L.LightningModule):
         return self.forward(x).flatten(start_dim=1)
 
 
-def get_transform():
-    transform = _get_transforms('float', 'norm','blur','rotate', 'crop','hflip', 'vflip', 'noise', 'rgb')
-    return transform
+# def get_transform():
+#     transform = _get_transforms('float', 'norm','blur','rotate', 'crop','hflip', 'vflip', 'noise', 'rgb')
+#     return transform
 
 def get_block(block_type):
     return {
@@ -227,8 +227,8 @@ def _get_trainer(args, trial=None):
     if args.early_stopping:
         early_stopping = EarlyStopping(
          monitor="val_accuracy",
-         min_delta=0.001,
-         patience=3,
+         min_delta=0.0001,
+         patience=10,
          verbose=False,
          mode="max"
         )
@@ -344,7 +344,7 @@ def predict(argv=None):
     args = parser.parse_args(argv)
 
     logger = get_logger('info')
-    transform = get_transform()
+    transform = _get_transforms('float', 'norm', 'crop', 'rgb')
 
     predict_files = args.prediction
 
