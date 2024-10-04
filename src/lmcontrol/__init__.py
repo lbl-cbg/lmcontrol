@@ -26,21 +26,9 @@ def main():
             
         },
         'Supervised Learning':{
-            'train-clf': Command('nn.clf.train', 'Train with classifier'),
-            'predict-clf': Command( 'nn.clf.predict', 'Predict with classifier'),
-            'stratify-clf': Command('nn.stratify-clf.stratify', 'Training and predicting with train_test_split stuff'),
-            'train-clf-time-reactor': Command('nn.main_clf_time_reactor.train', 'clf just wth equal data points for reactors too'), 
-            'predict-clf-time-reactor': Command('nn.main_clf_time_reactor.predict', 'clf just wth equal data points for reactors too'), 
-            'misclassify-clf-time-reactor': Command('nn.clf_time_reactor.misclassify', 'stores misclassified points just wth equal data points for reactors too'),
-            'train-superset': Command('nn.superset_clf_stratify_time.train', 'Superset train with classifier'),
-            'predict-superset': Command('nn.superset_clf_stratify_time.predict', 'Superset predict with classifier'),
-            'predict-confusion': Command('nn.superset_clf_stratify_time.predict', 'confusion_labels STUFF with Superset predict as classifier'),
-            'train-tr-val-clf-time-reactor': Command('nn.tr_val_clf_time_reactor.train', 'Tr=0.8,val=0.2 and clf used'),
-            'predict-tr-val-clf-time-reactor': Command('nn.tr_val_clf_time_reactor.predict', 'Tr=0.8,val=0.2 and clf used'),
-            'opta-args-train-main-clf-time-reactor': Command('nn.optatune_main_clf_time_reactor._add_training_args', 'Optatune used code training_args'),
-            'opta-train-main-clf-time-reactor': Command('nn.optatune_main_clf_time_reactor.train', 'Optatune used code for training'),
-            'opta-perdict-main-clf-time-reactor': Command('nn.optatune_main_clf_time_reactor.predict', 'Optatune used code for predicting'),
-            'opta-tune': Command('nn.optatune_main_clf_time_reactor.tune', 'Optatune used code for tune function'),
+            'opta-tune': Command('nn.clf.tune', 'Optatune used code for tune function'),
+            'opta-clf-train': Command('nn.clf.train', 'Optatune Train used code for tune function'),
+            'opta-clf-predict': Command('nn.clf.predict', 'Optatune Predict used code for tune function')
         },
     }
     import sys
