@@ -143,14 +143,7 @@ class LMDataset(Dataset):
     def index_to_filename(dataset, i):
         return dataset.paths[i]
 
-
-def extract_labels_from_filename(filename):
-    """Extract labels from filename in the format Sx_HTY_randomtext.npz"""
-    parts = filename.split('/')[-1].split('_')
-    x_label = parts[0][1:]  # Extract X from SX
-    y_label = parts[1][2:]  # Extract Y from HTY
-    return x_label, y_label
-
+# removed function :extract_labels_from_filename
 
 TRANSFORMS = {
         'blur': T.GaussianBlur(3, sigma=(0.01, 1.0)),
