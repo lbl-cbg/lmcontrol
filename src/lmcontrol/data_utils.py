@@ -59,8 +59,16 @@ def load_npzs(npzs, logger, n=None, label_types=None):
 
 def encode_labels(labels, return_classes=True):
     """This is a wrapper for sklearn.preprocessing.LabelEncoder"""
-    enc = LabelEncoder().fit(labels)
+    label_mapping = {
+        'S4': 28,
+        'S10': 100,
+        'S14': 148
+    }
+    
+    mapped_labels = [label_mapping.get(label, label) for label in labels]
+
+    enc = LabelEncoder().fit(mapped_labels)
     if return_classes:
-        return enc.transform(labels), enc.classes_
+        return enc.transform(mapped_labels), enc.classes_
     else:
-        return enc.transform(labels)
+        return enc.transform(mapped_labels)
