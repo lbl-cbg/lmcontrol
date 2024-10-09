@@ -160,7 +160,8 @@ def _add_training_args(parser):
     parser.add_argument("-save_emb", "--save_embeddings", action='store_true', default=False, help="saves embeddings, used for plotly/dash")
 
 def _get_loaders_and_model(args,  logger=None):
-    transform = get_transform()                                                         
+    transform_train = _get_transforms('float', 'norm','blur','rotate', 'crop','hflip', 'vflip', 'noise', 'rgb') 
+    transform_val = _get_transforms('float', 'norm','blur','rotate', 'crop','hflip', 'vflip', 'noise', 'rgb')                                                        
                                                                                              
     if args.val_frac:
         split_files = args.training
@@ -171,14 +172,14 @@ def _get_loaders_and_model(args,  logger=None):
             logger = get_logger("critical")
 
         logger.info(f"Loading training data from: {len(split_files)} files")
-        train_dataset = LMDataset(split_files, transform=transform, logger=logger, return_labels=True, label_types=args.labels, n=n, save_embeddings=args.save_embeddings, split='train', val_size=args.val_frac, seed=args.seed)
+        train_dataset = LMDataset(split_files, transform=transform_train, logger=logger, return_labels=True, label_types=args.labels, n=n, save_embeddings=args.save_embeddings, split='train', val_size=args.val_frac, seed=args.seed)
 
         for i in range(train_dataset.labels.shape[1]):
                 logger.info(train_dataset.label_types[i] + " - " + str(torch.unique(train_dataset.labels[:, i])) + str(train_dataset.label_classes))
 
 
         logger.info(f"Loading validation data from: {len(split_files)} files")
-        val_dataset = LMDataset(split_files, transform=transform, logger=logger, return_labels=True, label_types=args.labels, n=n, save_embeddings=args.save_embeddings, split='validate', val_size=args.val_frac, seed=args.seed)
+        val_dataset = LMDataset(split_files, transform=transform_val, logger=logger, return_labels=True, label_types=args.labels, n=n, save_embeddings=args.save_embeddings, split='validate', val_size=args.val_frac, seed=args.seed)
         for i in range(val_dataset.labels.shape[1]):
             logger.info(val_dataset.label_types[i] + " - " + str(torch.unique(val_dataset.labels[:, i])) + str(val_dataset.label_classes))
 
@@ -192,14 +193,14 @@ def _get_loaders_and_model(args,  logger=None):
             logger = get_logger("critical")
 
         logger.info(f"Loading training data: {len(train_files)} files")
-        train_dataset = LMDataset(train_files, transform=transform, logger=logger, return_labels=True, label_types=args.labels, n=n, save_embeddings=args.save_embeddings)
+        train_dataset = LMDataset(train_files, transform=transform_train, logger=logger, return_labels=True, label_types=args.labels, n=n, save_embeddings=args.save_embeddings)
 
         for i in range(train_dataset.labels.shape[1]):
                 logger.info(train_dataset.label_types[i] + " - " + str(torch.unique(train_dataset.labels[:, i])) + str(train_dataset.label_classes))
 
 
         logger.info(f"Loading validation data: {len(val_files)} files")
-        val_dataset = LMDataset(val_files, transform=transform, logger=logger, return_labels=True, label_types=args.labels, n=n, save_embeddings=args.save_embeddings)
+        val_dataset = LMDataset(val_files, transform=transform_val, logger=logger, return_labels=True, label_types=args.labels, n=n, save_embeddings=args.save_embeddings)
         for i in range(val_dataset.labels.shape[1]):
             logger.info(val_dataset.label_types[i] + " - " + str(torch.unique(val_dataset.labels[:, i])) + str(val_dataset.label_classes))
 
@@ -344,7 +345,7 @@ def predict(argv=None):
     args = parser.parse_args(argv)
 
     logger = get_logger('info')
-    transform = _get_transforms('float', 'norm', 'crop', 'rgb')
+    transform = _get_transforms('float', 'norm','blur','rotate', 'crop','hflip', 'vflip', 'noise', 'rgb')
 
     predict_files = args.prediction
 
