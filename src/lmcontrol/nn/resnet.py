@@ -19,7 +19,7 @@ class ResNet(nn.Module):
         block: Type[Union[BasicBlock, Bottleneck]],
         layers: List[int],
         planes: List[int],
-        num_classes: int = 1000, 
+        num_classes: int = 1, 
         zero_init_residual: bool = False,
         groups: int = 1,
         width_per_group: int = 64,
@@ -71,8 +71,8 @@ class ResNet(nn.Module):
         idx = max(i for i in range(len(layers)) if layers[i] != 0)
         n_features = planes[idx] * expansion[idx]
 
-        self.fc = nn.Linear(n_features, num_classes)  #new added from above
-
+        self.fc = nn.Linear(n_features, 1)  #new added from above
+        
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
