@@ -143,13 +143,13 @@ def _add_training_args(parser):
     parser.add_argument("-n", "--n_samples", type=int, help="number of samples to use from each NPZ", default=None)
     parser.add_argument("--early_stopping", action='store_true', help="enable early stopping", default=False)
     parser.add_argument("-stop_wandb", "--stop_wandb", action='store_false', default=True, help="provide this flag to stop wandb")
-    parser.add_argument("--lr", type=float, help="learning rate", default=0.01)                               
+    parser.add_argument("--lr", type=float, help="learning rate", default=0.001)                               
     parser.add_argument("--step_size", type=int, help="step size for learning rate scheduler", default=10)
     parser.add_argument("--gamma", type=float, help="gamma for learning rate scheduler", default=0.1)
-    parser.add_argument("--batch_size", type=int, help="batch size for training and validation", default=16)
-    parser.add_argument("--block", type=get_block, choices=['BasicBlock', 'Bottleneck'], help="type of block to use in the model", default='BasicBlock')
-    parser.add_argument("--planes", type=get_planes, choices=['3', '4'], help="list of number of planes for each layer", default='3')
-    parser.add_argument("--layers", type=get_layers, choices=['1', '2', '3', '4'], help="list of number of layers in each stage", default='3')
+    parser.add_argument("--batch_size", type=int, help="batch size for training and validation", default=32)
+    parser.add_argument("--block", type=get_block, choices=['BasicBlock', 'Bottleneck'], help="type of block to use in the model", default='Bottleneck')
+    parser.add_argument("--planes", type=get_planes, choices=['3', '4'], help="list of number of planes for each layer", default='4')
+    parser.add_argument("--layers", type=get_layers, choices=['1', '2', '3', '4'], help="list of number of layers in each stage", default='4')
     parser.add_argument("-save_emb", "--save_embeddings", action='store_true', default=False, help="saves embeddings, used for plotly/dash")
 
 def _get_loaders_and_model(args,  logger=None):
