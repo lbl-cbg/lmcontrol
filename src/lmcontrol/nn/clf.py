@@ -22,6 +22,7 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, confu
 from lightning.pytorch.callbacks import EarlyStopping
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
 from lightning.pytorch.callbacks import ModelCheckpoint
@@ -68,7 +69,7 @@ class LightningResNet(L.LightningModule):
         progress = True
 
         self.backbone = resnet(weights=None, progress=True, block=block, layers=layers, planes=planes,num_classes=num_classes, save_embeddings=save_embeddings) 
-        self.criterion = nn.CrossEntropyLoss()
+        self.criterion = nn.MSELoss()
         self.save_hyperparameters()
         self.lr = lr
         self.step_size = step_size
@@ -83,31 +84,23 @@ class LightningResNet(L.LightningModule):
     def training_step(self, batch, batch_idx):
         images, labels = batch
         outputs = self.forward(images)
-        loss = self.criterion(outputs, labels[:, 0])
+        loss = self.criterion(outputs, labels.float())
 
-        preds = torch.argmax(outputs, dim=1)
-        acc = accuracy_score(labels[:, 0].cpu().numpy(), preds.cpu().numpy())
-        self.log('train_accuracy', acc, on_step=False, on_epoch=True, prog_bar=True)
-
-        self.log('train_loss', loss, batch_size=images.size(0))
+        self.log('train_loss', loss, on_epoch=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
         images, labels = batch
         outputs = self.forward(images)
-        loss = self.criterion(outputs, labels[:, 0])
+        loss = self.criterion(outputs, labels.float())
 
-        preds = torch.argmax(outputs, dim=1)
-        acc = accuracy_score(labels[:, 0].cpu().numpy(), preds.cpu().numpy())
-        self.log('val_accuracy', acc, on_step=False, on_epoch=True, prog_bar=True)
-
-        self.log('val_loss', loss, batch_size=images.size(0))
+        self.log('val_loss', loss, on_epoch=True)
         return loss
 
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=0.01)
-        scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[5], gamma=0.1)
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
+        scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[10, 20, 30], gamma=self.gamma)
         return [optimizer], [scheduler]
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):  #Read the pytorch documentation to understand how its used
@@ -150,13 +143,13 @@ def _add_training_args(parser):
     parser.add_argument("-n", "--n_samples", type=int, help="number of samples to use from each NPZ", default=None)
     parser.add_argument("--early_stopping", action='store_true', help="enable early stopping", default=False)
     parser.add_argument("-stop_wandb", "--stop_wandb", action='store_false', default=True, help="provide this flag to stop wandb")
-    parser.add_argument("--lr", type=float, help="learning rate", default=0.001)                               
+    parser.add_argument("--lr", type=float, help="learning rate", default=0.01)                               
     parser.add_argument("--step_size", type=int, help="step size for learning rate scheduler", default=10)
     parser.add_argument("--gamma", type=float, help="gamma for learning rate scheduler", default=0.1)
-    parser.add_argument("--batch_size", type=int, help="batch size for training and validation", default=32)
-    parser.add_argument("--block", type=get_block, choices=['BasicBlock', 'Bottleneck'], help="type of block to use in the model", default='Bottleneck')
-    parser.add_argument("--planes", type=get_planes, choices=['3', '4'], help="list of number of planes for each layer", default='4')
-    parser.add_argument("--layers", type=get_layers, choices=['1', '2', '3', '4'], help="list of number of layers in each stage", default='4')
+    parser.add_argument("--batch_size", type=int, help="batch size for training and validation", default=16)
+    parser.add_argument("--block", type=get_block, choices=['BasicBlock', 'Bottleneck'], help="type of block to use in the model", default='BasicBlock')
+    parser.add_argument("--planes", type=get_planes, choices=['3', '4'], help="list of number of planes for each layer", default='3')
+    parser.add_argument("--layers", type=get_layers, choices=['1', '2', '3', '4'], help="list of number of layers in each stage", default='3')
     parser.add_argument("-save_emb", "--save_embeddings", action='store_true', default=False, help="saves embeddings, used for plotly/dash")
 
 def _get_loaders_and_model(args,  logger=None):
@@ -213,7 +206,7 @@ def _get_loaders_and_model(args,  logger=None):
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, drop_last=True, num_workers=num_workers)
     val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, drop_last=True, num_workers=num_workers)
 
-    model = LightningResNet(num_classes=len(train_dataset.label_classes[0]),lr=args.lr, step_size=args.step_size, gamma=args.gamma, block=args.block, planes=args.planes, layers=args.layers, save_embeddings= args.save_embeddings)
+    model = LightningResNet(num_classes=1,lr=args.lr, step_size=args.step_size, gamma=args.gamma, block=args.block, planes=args.planes, layers=args.layers, save_embeddings= args.save_embeddings)
 
     return train_loader, val_loader, model
 
@@ -227,21 +220,21 @@ def _get_trainer(args, trial=None):
 
     if args.early_stopping:
         early_stopping = EarlyStopping(
-         monitor="val_accuracy",
+         monitor="val_loss",
          min_delta=0.0001,
          patience=10,
          verbose=False,
-         mode="max"
+         mode="min"
         )
         callbacks.append(early_stopping)
 
     if args.checkpoint:
         checkpoint_callback = ModelCheckpoint(
             dirpath=args.checkpoint,  
-            filename="checkpoint-{epoch:02d}-{val_accuracy:.4f}",  
+            filename="checkpoint-{epoch:02d}-{val_loss:.4f}",  
             save_top_k=3, 
-            monitor="val_accuracy", 
-            mode="max"  
+            monitor="val_loss", 
+            mode="min"  
         )
         callbacks.append(checkpoint_callback)
         
@@ -368,7 +361,9 @@ def predict(argv=None):
     predictions = trainer.predict(model, predict_loader)
     predictions = torch.cat(predictions).numpy()
 
-    pred_labels = np.argmax(predictions, axis=1)  
+    pred_values = predictions.flatten() 
+
+    logger.info("Regression Predictions:")
 
     if args.save_embeddings:
         logger.info("No classifier mode: Saving embeddings")
@@ -379,31 +374,24 @@ def predict(argv=None):
         pred_labels = np.argmax(predictions, axis=1)  
 
         if true_labels is not None:
-            accuracy = accuracy_score(true_labels, pred_labels)
-            precision = precision_score(true_labels, pred_labels, average='weighted')
-            recall = recall_score(true_labels, pred_labels, average='weighted')
-            conf_matrix = confusion_matrix(true_labels, pred_labels)
+            mse = mean_squared_error(true_labels, pred_values)
+            mae = mean_absolute_error(true_labels, pred_values)
+            r2 = r2_score(true_labels, pred_values)
 
-            logger.info(f"Accuracy: {accuracy:.4f}")
-            logger.info(f"Precision: {precision:.4f}")
-            logger.info(f"Recall: {recall:.4f}")
-            logger.info(f"Confusion Matrix:\n{conf_matrix}")
+            logger.info(f"Mean Squared Error: {mse:.4f}")
+            logger.info(f"Mean Absolute Error: {mae:.4f}")
+            logger.info(f"R² Score: {r2:.4f}")
 
-            out_data = dict(predictions=predictions, true_labels=true_labels, pred_labels=pred_labels)
-            correct_incorrect = np.where(pred_labels == true_labels, 1, 0)
-            out_data['correct_incorrect'] = correct_incorrect
-
+            out_data = dict(predictions=predictions, true_labels=true_labels, pred_values=pred_values)
         else:
-            out_data = dict(predictions=predictions, pred_labels=pred_labels)
+            out_data = dict(predictions=predictions, pred_values=pred_values)
 
     if not args.pred_only:
         dset = predict_dataset   
         out_data['images'] = np.asarray(torch.squeeze(dset.data))
         for i, k in enumerate(dset.label_types):
-            out_data[k + "_classes"] = dset.label_classes[i]
             out_data[k + "_labels"] = np.asarray(dset.labels[:, i])
 
-  
     np.savez(args.output_npz, **out_data)
 
     if not args.save_embeddings:

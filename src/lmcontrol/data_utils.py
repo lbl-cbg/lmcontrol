@@ -66,9 +66,5 @@ def encode_labels(labels, return_classes=True):
     }
     
     mapped_labels = [label_mapping.get(label, label) for label in labels]
-
-    enc = LabelEncoder().fit(mapped_labels)
-    if return_classes:
-        return enc.transform(mapped_labels), enc.classes_
-    else:
-        return enc.transform(mapped_labels)
+    
+    return np.array(mapped_labels, dtype=np.float32)

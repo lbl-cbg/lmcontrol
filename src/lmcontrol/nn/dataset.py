@@ -59,10 +59,8 @@ class Norm(T._transform.Transform):
     def __call__(self, sample: torch.Tensor) -> torch.Tensor:
         ret = self.T(self.T(sample) - self.T(sample.mean(dim=(-2, -1))))
         if self.scale:
-            #ret = self.T(self.T(ret) / self.T(torch.amax(torch.abs(ret), dim=(-2, -1))))
-            ret = self.T(self.T(ret) / self.T(torch.std(ret, dim=(-2, -1)))) #Changed from max -> standard deviation
+            ret = self.T(self.T(ret) / self.T(torch.std(ret, dim=(-2, -1))))
         return ret
-
 
 
 class LMDataset(Dataset):
@@ -97,15 +95,13 @@ class LMDataset(Dataset):
 
         if return_labels:
             tmp = list()
-            self.label_classes = list()
             self.label_types = list()
             for k in metadata:
                 if not save_embeddings:           
                     if k not in label_types:
                         continue
                 self.label_types.append(k)
-                labels, classes = encode_labels(metadata[k])
-                self.label_classes.append(classes)
+                labels = encode_labels(metadata[k])  
                 tmp.append(labels)
             self.labels = torch.from_numpy(np.stack(tmp, axis=1))
         
@@ -134,6 +130,8 @@ class LMDataset(Dataset):
         if self.transform is not None:
             ret = self.transform(ret)
         labels = -1 if self.labels is None else self.labels[i]
+        if labels is not None:
+            labels = labels.view(-1)  
         return ret, labels
 
     def __len__(self):
