@@ -1,3 +1,4 @@
+
 import argparse
 import logging
 import sys
@@ -14,7 +15,6 @@ with warnings.catch_warnings():
 
 from ..utils import get_logger
 from ..data_utils import encode_labels, load_npzs
-
 
 def compute_embedding(data, logger, metric='euclidean', two_d=False, center_images=False):
     ncomp = 2 if two_d else 3
@@ -37,7 +37,7 @@ def prepare_labels(metadata):
 
 def main(argv=None):
     """
-    Make an NPZ archive with data necesary for interactive visualization of images
+    Make an NPZ archive with data necessary for interactive visualization of images
     """
 
     parser = argparse.ArgumentParser()
@@ -72,10 +72,17 @@ def main(argv=None):
                 kwargs[k] = npz[k]
         images = npz['images']
         kwargs['predictions'] = data
+        if 'true_labels' in npz.files and 'pred_labels' in npz.files:
+            kwargs['true_labels'] = npz['true_labels']
+            kwargs['Prediction_labels'] = npz['pred_labels']
+            correct_incorrect = kwargs['true_labels'] == kwargs['Prediction_labels']
+            kwargs['Prediction_classes'] = ['Incorrect:0', 'Correct:1']
+            kwargs['Prediction_labels'] = correct_incorrect.astype(int)
+            kwargs['Prediction_labels_readable_labels'] = ['Correct' if label == 1 else 'Incorrect' for label in correct_incorrect]
     else:
-        masks, images, paths, metadata = load_npzs(args.npzs, logger)
+        images, metadata, embedding = load_npzs(args.npzs, logger)
         kwargs = prepare_labels(metadata)
-        data = images
+        data = embedding
         if args.masks:
             data = masks
             metric = 'jaccard'
@@ -86,6 +93,7 @@ def main(argv=None):
     logger.info(f"Saving embeddings, images, and metadata to {args.out_npz}", )
     np.savez(args.out_npz, images=images, embedding=emb, **kwargs)
 
-
+ 
 if __name__ == "__main__":
     main()
+
