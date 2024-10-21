@@ -39,7 +39,7 @@ def load_data(path):
         if '_labels' in k:
             label = k[:-7]
             labels[label] = {'labels': npz[label+'_labels'], 'classes': npz[label+'_classes']}
-    return npz['images'], npz['embedding'], npz['residuals'], npz['predicted_values'] labels
+    return npz['images'], npz['embedding'], npz['residuals'], npz['predicted_values'], labels
 
 
 def prob(string):  ##???
