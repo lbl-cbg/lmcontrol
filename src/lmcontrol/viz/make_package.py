@@ -72,13 +72,18 @@ def main(argv=None):
                 kwargs[k] = npz[k]
         images = npz['images']
         kwargs['predictions'] = data
-        if 'true_labels' in npz.files and 'pred_labels' in npz.files:
-            kwargs['true_labels'] = npz['true_labels']
-            kwargs['Prediction_labels'] = npz['pred_labels']
-            correct_incorrect = kwargs['true_labels'] == kwargs['Prediction_labels']
-            kwargs['Prediction_classes'] = ['Incorrect:0', 'Correct:1']
-            kwargs['Prediction_labels'] = correct_incorrect.astype(int)
-            kwargs['Prediction_labels_readable_labels'] = ['Correct' if label == 1 else 'Incorrect' for label in correct_incorrect]
+        if 'true_values' in npz.files and 'pred_values' in npz.files:
+            kwargs['time_values'] = npz['true_values'].astype(int)
+            kwargs['predicted_values'] = npz['pred_values']
+            kwargs['residuals'] = npz['residuals']
+            time_classes = np.unique(npz['time_labels'])
+
+            class_map = {v: i for i, v in enumerate(time_classes)}
+            mapped_time_labels = np.array([class_map[label] for label in kwargs['time_values']])
+
+            kwargs['time_labels'] = mapped_time_labels
+            kwargs['time_classes'] = time_classes.astype(int)
+            kwargs['time_classes'] = kwargs['time_classes'].astype(str)
     else:
         images, metadata, embedding = load_npzs(args.npzs, logger)
         kwargs = prepare_labels(metadata)

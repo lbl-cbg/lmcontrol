@@ -324,36 +324,34 @@ def tune(argv=None):
 
 def predict(argv=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument('labels', type=str, help="the label to predict with") #Let us currently only work with single label. We will add other labels in future  (Andrew)
+    parser.add_argument('labels', type=str, help="the label to predict with")  # Currently only for single label
     parser.add_argument("--prediction", type=str, nargs='+', required=True, help="directories containing prediction data")
-    parser.add_argument("-c","--checkpoint", type=str, help="path to the model checkpoint file to use for inference")
-    parser.add_argument("-o","--output_npz", type=str, help="the path to save the embeddings to. Saved in NPZ format")
+    parser.add_argument("-c", "--checkpoint", type=str, help="path to the model checkpoint file to use for inference")
+    parser.add_argument("-o", "--output_npz", type=str, help="the path to save the embeddings to. Saved in NPZ format")
     parser.add_argument("-d", "--debug", action='store_true', help="run with a small dataset", default=False)
     parser.add_argument("-p", "--pred-only", action='store_true', default=False, help="only save predictions, otherwise save original image data and labels in output_npz")
     parser.add_argument("-n", "--data_size", type=int, help="number of samples to use from each class", default=None)
     parser.add_argument("-save_emb", "--save_embeddings", action='store_true', default=False, help="provide this if you don't want classifier, helpful in embeddings stuff")
-    parser.add_argument("-save_misclassifed", "--save_misclassified", type=str, default=None, help="Directory to save the misclassified samples.")
-    parser.add_argument("-save_confusion", "--save_confusion", type=str, default=None, help="Directory to save the confusion keys, which can be later used for plotly.")
+    parser.add_argument("-save_residuals", "--save_residuals", action='store_true', default=False, help="provide this if you want to store the residual values")
 
     args = parser.parse_args(argv)
 
     logger = get_logger('info')
-    transform = _get_transforms('float', 'norm','blur','rotate', 'crop','hflip', 'vflip', 'noise', 'rgb')
+    transform = _get_transforms('float', 'norm', 'blur', 'rotate', 'crop', 'hflip', 'vflip', 'noise', 'rgb')
 
     predict_files = args.prediction
-
     n = args.data_size
 
-    logger.info(f"Loading predicting data: {len(predict_files)} files")
+    logger.info(f"Loading prediction data: {len(predict_files)} files")
     predict_dataset = LMDataset(predict_files, transform=transform, logger=logger, return_labels=True, label_types=args.labels, n=n, save_embeddings=args.save_embeddings)
     for i in range(predict_dataset.labels.shape[1]):
         logger.info(predict_dataset.label_types[i] + " - " + str(torch.unique(predict_dataset.labels[:, i])) + str(predict_dataset.label_classes))
 
-    true_labels = predict_dataset.labels[:, 0]  
+    true_labels = predict_dataset.labels[:, 0]
 
     predict_loader = DataLoader(predict_dataset, batch_size=32, shuffle=False, drop_last=False, num_workers=3)
 
-    model = LightningResNet.load_from_checkpoint(args.checkpoint, save_embeddings= args.save_embeddings)
+    model = LightningResNet.load_from_checkpoint(args.checkpoint, save_embeddings=args.save_embeddings)
     accelerator = "gpu" if torch.cuda.is_available() else "cpu"
     trainer = L.Trainer(devices=1, accelerator=accelerator)
 
@@ -361,17 +359,17 @@ def predict(argv=None):
     predictions = trainer.predict(model, predict_loader)
     predictions = torch.cat(predictions).numpy()
 
-    pred_values = predictions.flatten() 
+    pred_values = predictions.flatten()
 
     logger.info("Regression Predictions:")
 
     if args.save_embeddings:
         logger.info("No classifier mode: Saving embeddings")
-        out_data = dict(predictions=predictions) 
-        label_types=None
+        out_data = dict(predictions=predictions)
+        label_types = None
     else:
         logger.info("Classifier mode: Saving predictions")
-        pred_labels = np.argmax(predictions, axis=1)  
+        pred_labels = np.argmax(predictions, axis=1)
 
         if true_labels is not None:
             mse = mean_squared_error(true_labels, pred_values)
@@ -382,103 +380,26 @@ def predict(argv=None):
             logger.info(f"Mean Absolute Error: {mae:.4f}")
             logger.info(f"R² Score: {r2:.4f}")
 
-            out_data = dict(predictions=predictions, true_labels=true_labels, pred_values=pred_values)
+            if args.save_residuals:
+                logger.info("Calculating and saving residuals")
+                residuals = true_labels - pred_values
+                out_data = dict(predictions=predictions, true_values=true_labels, pred_values=pred_values, residuals=residuals)
+            else:
+                out_data = dict(predictions=predictions, true_labels=true_labels, pred_labels=pred_values)
+
         else:
-            out_data = dict(predictions=predictions, pred_values=pred_values)
+            out_data = dict(predictions=predictions, pred_labels=pred_values)
 
     if not args.pred_only:
-        dset = predict_dataset   
+        dset = predict_dataset
         out_data['images'] = np.asarray(torch.squeeze(dset.data))
         for i, k in enumerate(dset.label_types):
             out_data[k + "_labels"] = np.asarray(dset.labels[:, i])
 
     np.savez(args.output_npz, **out_data)
 
-    if not args.save_embeddings:
-        if args.save_misclassified is None and args.save_confusion is None:
-            print("Error: No directories provided for saving misclassified samples or confusion matrix.")
-        else:
-            if args.save_misclassified is not None or args.save_confusion is not None:
-                save_misclassified_samples(prediction_file=args.output_npz, 
-                                        save_misclassified=args.save_misclassified, 
-                                        save_confusion=args.save_confusion, 
-                                        classes=predict_dataset.label_classes[0])
+    logger.info(f"Predictions and residuals saved to {args.output_npz}")
 
-
-
-
-def save_misclassified_samples(prediction_file=None, save_misclassified=None, save_confusion=None, classes=None):
-    data = np.load(prediction_file)
-
-    predictions = data['predictions']
-    true_labels = data['true_labels']
-    pred_labels = data['pred_labels']
-    correct_incorrect = data['correct_incorrect']
-    images = data['images']
-
-    if save_misclassified is None:
-        print("Warning: No directory provided for saving misclassified samples. Skipping.")
-        save_misclassified = None  
-    if save_confusion is None:
-        print("Warning: No directory provided for saving confusion matrix. Skipping.")
-        save_confusion = None  
-
-    if save_misclassified and not os.path.exists(save_misclassified):
-        os.makedirs(save_misclassified)
-    if save_confusion and not os.path.exists(save_confusion):
-        os.makedirs(save_confusion)
-
-    if save_misclassified:
-        misclassified_indices = np.where(correct_incorrect == 0)[0]
-        unique_misclassifications = set(zip(true_labels[misclassified_indices], pred_labels[misclassified_indices]))
-
-        for true_label, pred_label in unique_misclassifications:
-            indices = np.where((true_labels == true_label) & 
-                               (pred_labels == pred_label) & 
-                               (correct_incorrect == 0))[0]
-
-            if len(indices) > 0:
-                true_label_name = classes[true_label]
-                pred_label_name = classes[pred_label]
-
-                npz_filename = os.path.join(save_misclassified, f"misclassified_{true_label_name}_as_{pred_label_name}.npz")
-
-                np.savez(npz_filename,
-                         images=images[indices],
-                         true_labels=true_labels[indices],
-                         pred_labels=pred_labels[indices],
-                         predictions=predictions[indices])
-
-                print(f"Saved {len(indices)} misclassified samples of class {true_label_name} predicted as {pred_label_name} to {npz_filename}")
-            else:
-                print(f"No misclassified samples of class {true_label_name} predicted as {pred_label_name}")
-
-    if save_confusion:
-        confusion_keys = [f"{true}->{pred}" for true in classes for pred in classes]
-        encoder = LabelEncoder()
-        encoder.fit(confusion_keys)
-
-        confusion_classes = list(encoder.classes_)
-        confusion_labels = []
-
-        for true, pred in zip(true_labels, pred_labels):
-            confusion_key = f"{classes[true]}->{classes[pred]}"
-            if confusion_key in encoder.classes_:
-                confusion_labels.append(confusion_key)
-
-        encoded_confusion_labels = encoder.transform(confusion_labels)
-
-        new_data = {
-            'confusion_classes': confusion_classes,
-            'confusion_labels': encoded_confusion_labels,
-            **{key: data[key] for key in data.keys() if key not in ['true_labels', 'pred_labels']}
-        }
-
-        output_file_path = os.path.join(save_confusion, os.path.basename(prediction_file))
-        np.savez(output_file_path, **new_data)
-
-        print(f"Modified .npz file saved at {output_file_path}")
-  
 
 if __name__ == '__main__':
-    train()
+    predict()

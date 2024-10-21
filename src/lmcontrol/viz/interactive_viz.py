@@ -39,10 +39,10 @@ def load_data(path):
         if '_labels' in k:
             label = k[:-7]
             labels[label] = {'labels': npz[label+'_labels'], 'classes': npz[label+'_classes']}
-    return npz['images'], npz['embedding'], labels
+    return npz['images'], npz['embedding'], npz['residuals'], npz['predicted_values'] labels
 
 
-def prob(string):
+def prob(string):  ##???
     ret = float(string)
     if ret > 1.0 or ret < 0.0:
         raise argparse.ArgumentTypeError()
@@ -65,11 +65,11 @@ def build_app(npz, subsample=None, stratify_label=None, **addl_labels):
         app (dash.Dash)         : a Dash application
     """
 
-    images, emb, all_labels = load_data(npz)
+    images, emb, res, predicted_values, all_labels = load_data(npz)
 
     for k in addl_labels:
         all_labels[k] = dict()
-        enc = LabelEncoder()
+        enc = LabelEncoder()  
         all_labels[k]['labels'] = enc.fit_transform(addl_labels[k])
         all_labels[k]['classes'] = list(map(str, enc.classes_))
 
@@ -89,15 +89,30 @@ def build_app(npz, subsample=None, stratify_label=None, **addl_labels):
     encoded_images = [np_image_to_base64(img) for img in images]
 
     # Compute display label
+    # display_text = list()
+    # for i in range(len(emb)):
+    #     tmp = list()
+    #     for k in all_labels:
+    #         c = all_labels[k]['classes'][all_labels[k]['labels'][i]]
+    #         tmp.append(f"{k}: {c}")
+    #     display_text.append(f"idx: {idx[i]}\n" + " | ".join(tmp))
+
     display_text = list()
     for i in range(len(emb)):
         tmp = list()
         for k in all_labels:
-            c = all_labels[k]['classes'][all_labels[k]['labels'][i]]
-            tmp.append(f"{k}: {c}")
+            # Show the original label
+            original_label = all_labels[k]['classes'][all_labels[k]['labels'][i]]
+            tmp.append(f"{k}: {original_label}")
+            
+            # Optionally, show the predicted value as well, if you want both original and predicted labels
+            predicted_label = predicted_values[i]  # Assuming predicted_values holds the predicted labels
+            tmp.append(f"Predicted: {predicted_label}")
+        
+        # Combine index, original labels, and predicted label into one string for each point
         display_text.append(f"idx: {idx[i]}\n" + " | ".join(tmp))
 
-    # Set up data for graph object
+
     scatter = go.Scatter
     df_data = dict(x=emb[:, 0], y=emb[:, 1])
     if emb.shape[1]== 3:
@@ -110,11 +125,6 @@ def build_app(npz, subsample=None, stratify_label=None, **addl_labels):
     for k in all_labels:
         df_data[k] = all_labels[k]['labels']
     df = pd.DataFrame(df_data)
-
-    # A map from class name to unique labels for maintaining constency
-    # between Traces added in update_scatter_plot and curveNum in hoverData
-    # passed into display_hover. This will get used to get
-    # label value for each data point
     classes = {k: df[k].unique() for k in all_labels}
 
     dd_options = [{'label': k, 'value': k} for k in all_labels]
@@ -150,9 +160,6 @@ def build_app(npz, subsample=None, stratify_label=None, **addl_labels):
         bbox = hover_data["bbox"]
         num = hover_data["pointNumber"]
 
-        # curveNumber correspoends to the order in which the Trace was
-        # added to the Figure. For example, curveNumber=4 means we need to get
-        # data for the fifth Trace that was added to the Figure.
         class_id = hover_data['curveNumber']
         class_val = classes[current_selected_label][class_id]
         mask = df[current_selected_label] == class_val
@@ -176,7 +183,6 @@ def build_app(npz, subsample=None, stratify_label=None, **addl_labels):
 
         return True, bbox, children
 
-    # Make a function for updating the display when we toggle label
     @app.callback(
         Output('scatter-plot', 'figure'),
         [Input('label-dropdown', 'value')],
@@ -185,20 +191,17 @@ def build_app(npz, subsample=None, stratify_label=None, **addl_labels):
     def update_scatter_plot(selected_label, relayout_data):
         """Create Figure with scatter plot"""
 
-        # we need to maintain a global state so display_hover
-        # knows what label we are currently using
         global current_selected_label
         current_selected_label = selected_label
 
+        selected_label = time
+
         fig = go.Figure()
-        # add a Trace object for each class label. The order in which
-        # we iterate over these values corresponds to curveNum included
-        # in hoverData passed into display_hover
         for cls in classes[selected_label]:
             mask = df[selected_label] == cls
             fig_kwargs = {var: df[var][mask] for var in fig_vars}
             fig.add_trace(scatter(
-                name=all_labels[selected_label]['classes'][cls],
+                name=str(all_labels[selected_label]['classes'][cls]),
                 mode='markers',
                 marker=dict(
                     size=2,
@@ -206,7 +209,6 @@ def build_app(npz, subsample=None, stratify_label=None, **addl_labels):
                 **fig_kwargs
             ))
 
-        # Options for rendering the legend
         legend=dict(
             x=0,
             y=0,
