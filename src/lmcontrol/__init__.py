@@ -23,6 +23,12 @@ def main():
         'Self-supervised Learning': {
             'train-byol': Command('nn.byol.train', 'Train BYOL model'),
             'infer-byol': Command('nn.byol.predict', 'Run with inference BYOL backbone'),
+            
+        },
+        'Supervised Learning':{
+            'opta-tune': Command('nn.clf.tune', 'Optatune used code for tune function'),
+            'opta-clf-train': Command('nn.clf.train', 'Optatune Train used code for tune function'),
+            'opta-clf-predict': Command('nn.clf.predict', 'Optatune Predict used code for tune function')
         },
     }
     import sys
