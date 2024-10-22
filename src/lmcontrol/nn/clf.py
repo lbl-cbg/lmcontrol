@@ -22,6 +22,7 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, confu
 from lightning.pytorch.callbacks import EarlyStopping
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
 from lightning.pytorch.callbacks import ModelCheckpoint
@@ -68,7 +69,7 @@ class LightningResNet(L.LightningModule):
         progress = True
 
         self.backbone = resnet(weights=None, progress=True, block=block, layers=layers, planes=planes,num_classes=num_classes, save_embeddings=save_embeddings) 
-        self.criterion = nn.CrossEntropyLoss()
+        self.criterion = nn.MSELoss()
         self.save_hyperparameters()
         self.lr = lr
         self.step_size = step_size
@@ -83,31 +84,23 @@ class LightningResNet(L.LightningModule):
     def training_step(self, batch, batch_idx):
         images, labels = batch
         outputs = self.forward(images)
-        loss = self.criterion(outputs, labels[:, 0])
+        loss = self.criterion(outputs, labels.float())
 
-        preds = torch.argmax(outputs, dim=1)
-        acc = accuracy_score(labels[:, 0].cpu().numpy(), preds.cpu().numpy())
-        self.log('train_accuracy', acc, on_step=False, on_epoch=True, prog_bar=True)
-
-        self.log('train_loss', loss, batch_size=images.size(0))
+        self.log('train_loss', loss, on_epoch=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
         images, labels = batch
         outputs = self.forward(images)
-        loss = self.criterion(outputs, labels[:, 0])
+        loss = self.criterion(outputs, labels.float())
 
-        preds = torch.argmax(outputs, dim=1)
-        acc = accuracy_score(labels[:, 0].cpu().numpy(), preds.cpu().numpy())
-        self.log('val_accuracy', acc, on_step=False, on_epoch=True, prog_bar=True)
-
-        self.log('val_loss', loss, batch_size=images.size(0))
+        self.log('val_loss', loss, on_epoch=True)
         return loss
 
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=0.01)
-        scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[5], gamma=0.1)
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
+        scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[10, 20, 30], gamma=self.gamma)
         return [optimizer], [scheduler]
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):  #Read the pytorch documentation to understand how its used
@@ -213,7 +206,7 @@ def _get_loaders_and_model(args,  logger=None):
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, drop_last=True, num_workers=num_workers)
     val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, drop_last=True, num_workers=num_workers)
 
-    model = LightningResNet(num_classes=len(train_dataset.label_classes[0]),lr=args.lr, step_size=args.step_size, gamma=args.gamma, block=args.block, planes=args.planes, layers=args.layers, save_embeddings= args.save_embeddings)
+    model = LightningResNet(num_classes=1,lr=args.lr, step_size=args.step_size, gamma=args.gamma, block=args.block, planes=args.planes, layers=args.layers, save_embeddings= args.save_embeddings)
 
     return train_loader, val_loader, model
 
@@ -227,21 +220,21 @@ def _get_trainer(args, trial=None):
 
     if args.early_stopping:
         early_stopping = EarlyStopping(
-         monitor="val_accuracy",
+         monitor="val_loss",
          min_delta=0.0001,
          patience=10,
          verbose=False,
-         mode="max"
+         mode="min"
         )
         callbacks.append(early_stopping)
 
     if args.checkpoint:
         checkpoint_callback = ModelCheckpoint(
             dirpath=args.checkpoint,  
-            filename="checkpoint-{epoch:02d}-{val_accuracy:.4f}",  
+            filename="checkpoint-{epoch:02d}-{val_loss:.4f}",  
             save_top_k=3, 
-            monitor="val_accuracy", 
-            mode="max"  
+            monitor="val_loss", 
+            mode="min"  
         )
         callbacks.append(checkpoint_callback)
         
@@ -331,36 +324,34 @@ def tune(argv=None):
 
 def predict(argv=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument('labels', type=str, help="the label to predict with") #Let us currently only work with single label. We will add other labels in future  (Andrew)
+    parser.add_argument('labels', type=str, help="the label to predict with")  # Currently only for single label
     parser.add_argument("--prediction", type=str, nargs='+', required=True, help="directories containing prediction data")
-    parser.add_argument("-c","--checkpoint", type=str, help="path to the model checkpoint file to use for inference")
-    parser.add_argument("-o","--output_npz", type=str, help="the path to save the embeddings to. Saved in NPZ format")
+    parser.add_argument("-c", "--checkpoint", type=str, help="path to the model checkpoint file to use for inference")
+    parser.add_argument("-o", "--output_npz", type=str, help="the path to save the embeddings to. Saved in NPZ format")
     parser.add_argument("-d", "--debug", action='store_true', help="run with a small dataset", default=False)
     parser.add_argument("-p", "--pred-only", action='store_true', default=False, help="only save predictions, otherwise save original image data and labels in output_npz")
     parser.add_argument("-n", "--data_size", type=int, help="number of samples to use from each class", default=None)
     parser.add_argument("-save_emb", "--save_embeddings", action='store_true', default=False, help="provide this if you don't want classifier, helpful in embeddings stuff")
-    parser.add_argument("-save_misclassifed", "--save_misclassified", type=str, default=None, help="Directory to save the misclassified samples.")
-    parser.add_argument("-save_confusion", "--save_confusion", type=str, default=None, help="Directory to save the confusion keys, which can be later used for plotly.")
+    parser.add_argument("-save_residuals", "--save_residuals", action='store_true', default=False, help="provide this if you want to store the residual values")
 
     args = parser.parse_args(argv)
 
     logger = get_logger('info')
-    transform = _get_transforms('float', 'norm','blur','rotate', 'crop','hflip', 'vflip', 'noise', 'rgb')
+    transform = _get_transforms('float', 'norm', 'blur', 'rotate', 'crop', 'hflip', 'vflip', 'noise', 'rgb')
 
     predict_files = args.prediction
-
     n = args.data_size
 
-    logger.info(f"Loading predicting data: {len(predict_files)} files")
+    logger.info(f"Loading prediction data: {len(predict_files)} files")
     predict_dataset = LMDataset(predict_files, transform=transform, logger=logger, return_labels=True, label_types=args.labels, n=n, save_embeddings=args.save_embeddings)
     for i in range(predict_dataset.labels.shape[1]):
         logger.info(predict_dataset.label_types[i] + " - " + str(torch.unique(predict_dataset.labels[:, i])) + str(predict_dataset.label_classes))
 
-    true_labels = predict_dataset.labels[:, 0]  
+    true_labels = predict_dataset.labels[:, 0]
 
     predict_loader = DataLoader(predict_dataset, batch_size=32, shuffle=False, drop_last=False, num_workers=3)
 
-    model = LightningResNet.load_from_checkpoint(args.checkpoint, save_embeddings= args.save_embeddings)
+    model = LightningResNet.load_from_checkpoint(args.checkpoint, save_embeddings=args.save_embeddings)
     accelerator = "gpu" if torch.cuda.is_available() else "cpu"
     trainer = L.Trainer(devices=1, accelerator=accelerator)
 
@@ -368,129 +359,47 @@ def predict(argv=None):
     predictions = trainer.predict(model, predict_loader)
     predictions = torch.cat(predictions).numpy()
 
-    pred_labels = np.argmax(predictions, axis=1)  
+    pred_values = predictions.flatten()
+
+    logger.info("Regression Predictions:")
 
     if args.save_embeddings:
         logger.info("No classifier mode: Saving embeddings")
-        out_data = dict(predictions=predictions) 
-        label_types=None
+        out_data = dict(predictions=predictions)
+        label_types = None
     else:
         logger.info("Classifier mode: Saving predictions")
-        pred_labels = np.argmax(predictions, axis=1)  
+        pred_labels = np.argmax(predictions, axis=1)
 
         if true_labels is not None:
-            accuracy = accuracy_score(true_labels, pred_labels)
-            precision = precision_score(true_labels, pred_labels, average='weighted')
-            recall = recall_score(true_labels, pred_labels, average='weighted')
-            conf_matrix = confusion_matrix(true_labels, pred_labels)
+            mse = mean_squared_error(true_labels, pred_values)
+            mae = mean_absolute_error(true_labels, pred_values)
+            r2 = r2_score(true_labels, pred_values)
 
-            logger.info(f"Accuracy: {accuracy:.4f}")
-            logger.info(f"Precision: {precision:.4f}")
-            logger.info(f"Recall: {recall:.4f}")
-            logger.info(f"Confusion Matrix:\n{conf_matrix}")
+            logger.info(f"Mean Squared Error: {mse:.4f}")
+            logger.info(f"Mean Absolute Error: {mae:.4f}")
+            logger.info(f"R² Score: {r2:.4f}")
 
-            out_data = dict(predictions=predictions, true_labels=true_labels, pred_labels=pred_labels)
-            correct_incorrect = np.where(pred_labels == true_labels, 1, 0)
-            out_data['correct_incorrect'] = correct_incorrect
+            if args.save_residuals:
+                logger.info("Calculating and saving residuals")
+                residuals = true_labels - pred_values
+                out_data = dict(predictions=predictions, true_values=true_labels, pred_values=pred_values, residuals=residuals)
+            else:
+                out_data = dict(predictions=predictions, true_labels=true_labels, pred_labels=pred_values)
 
         else:
-            out_data = dict(predictions=predictions, pred_labels=pred_labels)
+            out_data = dict(predictions=predictions, pred_labels=pred_values)
 
     if not args.pred_only:
-        dset = predict_dataset   
+        dset = predict_dataset
         out_data['images'] = np.asarray(torch.squeeze(dset.data))
         for i, k in enumerate(dset.label_types):
-            out_data[k + "_classes"] = dset.label_classes[i]
             out_data[k + "_labels"] = np.asarray(dset.labels[:, i])
 
-  
     np.savez(args.output_npz, **out_data)
 
-    if not args.save_embeddings:
-        if args.save_misclassified is None and args.save_confusion is None:
-            print("Error: No directories provided for saving misclassified samples or confusion matrix.")
-        else:
-            if args.save_misclassified is not None or args.save_confusion is not None:
-                save_misclassified_samples(prediction_file=args.output_npz, 
-                                        save_misclassified=args.save_misclassified, 
-                                        save_confusion=args.save_confusion, 
-                                        classes=predict_dataset.label_classes[0])
+    logger.info(f"Predictions and residuals saved to {args.output_npz}")
 
-
-
-
-def save_misclassified_samples(prediction_file=None, save_misclassified=None, save_confusion=None, classes=None):
-    data = np.load(prediction_file)
-
-    predictions = data['predictions']
-    true_labels = data['true_labels']
-    pred_labels = data['pred_labels']
-    correct_incorrect = data['correct_incorrect']
-    images = data['images']
-
-    if save_misclassified is None:
-        print("Warning: No directory provided for saving misclassified samples. Skipping.")
-        save_misclassified = None  
-    if save_confusion is None:
-        print("Warning: No directory provided for saving confusion matrix. Skipping.")
-        save_confusion = None  
-
-    if save_misclassified and not os.path.exists(save_misclassified):
-        os.makedirs(save_misclassified)
-    if save_confusion and not os.path.exists(save_confusion):
-        os.makedirs(save_confusion)
-
-    if save_misclassified:
-        misclassified_indices = np.where(correct_incorrect == 0)[0]
-        unique_misclassifications = set(zip(true_labels[misclassified_indices], pred_labels[misclassified_indices]))
-
-        for true_label, pred_label in unique_misclassifications:
-            indices = np.where((true_labels == true_label) & 
-                               (pred_labels == pred_label) & 
-                               (correct_incorrect == 0))[0]
-
-            if len(indices) > 0:
-                true_label_name = classes[true_label]
-                pred_label_name = classes[pred_label]
-
-                npz_filename = os.path.join(save_misclassified, f"misclassified_{true_label_name}_as_{pred_label_name}.npz")
-
-                np.savez(npz_filename,
-                         images=images[indices],
-                         true_labels=true_labels[indices],
-                         pred_labels=pred_labels[indices],
-                         predictions=predictions[indices])
-
-                print(f"Saved {len(indices)} misclassified samples of class {true_label_name} predicted as {pred_label_name} to {npz_filename}")
-            else:
-                print(f"No misclassified samples of class {true_label_name} predicted as {pred_label_name}")
-
-    if save_confusion:
-        confusion_keys = [f"{true}->{pred}" for true in classes for pred in classes]
-        encoder = LabelEncoder()
-        encoder.fit(confusion_keys)
-
-        confusion_classes = list(encoder.classes_)
-        confusion_labels = []
-
-        for true, pred in zip(true_labels, pred_labels):
-            confusion_key = f"{classes[true]}->{classes[pred]}"
-            if confusion_key in encoder.classes_:
-                confusion_labels.append(confusion_key)
-
-        encoded_confusion_labels = encoder.transform(confusion_labels)
-
-        new_data = {
-            'confusion_classes': confusion_classes,
-            'confusion_labels': encoded_confusion_labels,
-            **{key: data[key] for key in data.keys() if key not in ['true_labels', 'pred_labels']}
-        }
-
-        output_file_path = os.path.join(save_confusion, os.path.basename(prediction_file))
-        np.savez(output_file_path, **new_data)
-
-        print(f"Modified .npz file saved at {output_file_path}")
-  
 
 if __name__ == '__main__':
-    train()
+    predict()
