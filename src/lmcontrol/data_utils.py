@@ -60,9 +60,9 @@ def load_npzs(npzs, logger, n=None, label_types=None):
 def encode_labels(labels, return_classes=True):
     """This is a wrapper for sklearn.preprocessing.LabelEncoder"""
     label_mapping = {
-        'S4': 28,
-        'S10': 100,
-        'S14': 148
+        'S6': 52,
+        'S13': 141,
+        'S17': 189
     }
     
     mapped_labels = [label_mapping.get(label, label) for label in labels]
