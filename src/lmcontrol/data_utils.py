@@ -57,10 +57,16 @@ def load_npzs(npzs, logger, n=None, label_types=None):
             raise ValueError(f"Metadata '{k}' length mismatch: expected {target_len}, got {len(metadata[k])}")
     return masks, images, paths, metadata
 
-def encode_labels(labels, return_classes=True):
+def encode_labels(mode, labels, return_classes=True):
     """This is a wrapper for sklearn.preprocessing.LabelEncoder"""
     enc = LabelEncoder().fit(labels)
-    if return_classes:
-        return enc.transform(labels), enc.classes_
+    if mode == 'classification':
+        if return_classes:
+            return enc.transform(labels), enc.classes_
+        else:
+            return enc.transform(labels)
+    elif mode == 'regression':
+        labels = np.array(labels, dtype=np.float32)
+        return labels
     else:
-        return enc.transform(labels)
+        raise ValueError("mode must be either 'classification' or 'regression'")

@@ -65,11 +65,13 @@ class Norm(T._transform.Transform):
 
 class LMDataset(Dataset):
 
-    def __init__(self, npzs, use_masks=False, return_labels=False, logger=None, transform=None, label_types=None, n=None, save_embeddings=None, split=None, val_size=None, seed=None):
+    def __init__(self, npzs, mode=None, use_masks=False, return_labels=False, logger=None, transform=None, label_types=None, n=None, save_embeddings=None, split=None, val_size=None, seed=None):
         """
         Args:
             npzs (array-like)       : A list or tuple of paths to NPZ files containing cropped images
         """
+        self.mode = mode
+
         if not isinstance(npzs, (list, tuple, np.ndarray, torch.Tensor)):
             raise ValueError(f"Got unexpected type ({type(npzs)}) for argument 'npzs'. Must be an array-like")
         elif len(npzs) == 0:
@@ -95,12 +97,19 @@ class LMDataset(Dataset):
         if return_labels:
             tmp = list()
             self.label_types = list()
+            self.label_classes = list()
             for k in metadata:
                 if not save_embeddings:           
                     if k not in label_types:
                         continue
                 self.label_types.append(k)
-                labels = encode_labels(metadata[k])  
+                if self.mode == 'regression':
+                    labels = encode_labels(mode, metadata[k])  
+                elif self.mode == 'classification':     
+                    labels, classes = encode_labels(mode, metadata[k])
+                    self.label_classes.append(classes)
+                else:
+                    raise ValueError("task_type must be either 'classification' or 'regression'")
                 tmp.append(labels)
             self.labels = torch.from_numpy(np.stack(tmp, axis=1))
         
@@ -129,8 +138,7 @@ class LMDataset(Dataset):
         if self.transform is not None:
             ret = self.transform(ret)
         labels = -1 if self.labels is None else self.labels[i]
-        if labels is not None:
-            labels = labels.view(-1)  
+
         return ret, labels
 
     def __len__(self):
