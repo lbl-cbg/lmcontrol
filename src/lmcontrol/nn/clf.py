@@ -35,7 +35,7 @@ from ..data_utils import load_npzs, encode_labels
 from .dataset import LMDataset, get_transforms as _get_transforms
 from lmcontrol.nn.resnet import _resnet  
 
-def resnet(*, weights=None, progress=True, block=None, layers=None, planes=None,num_classes=None, save_embeddings=None) :
+def resnet(*,weights=None, progress=True, mode=None, block=None, layers=None, planes=None,num_classes=None, save_embeddings=None) :
     """ResNet-18 from `Deep Residual Learning for Image Recognition <https://arxiv.org/abs/1512.03385>`__.
 
     Args:
@@ -54,7 +54,7 @@ def resnet(*, weights=None, progress=True, block=None, layers=None, planes=None,
     .. autoclass:: torchvision.models.ResNet18_Weights
         :members:
     """
-    return _resnet(block=block, layers=layers, planes=planes, num_classes=num_classes, weights=weights, progress=progress, save_embeddings=save_embeddings)
+    return _resnet(mode=mode, block=block, layers=layers, planes=planes, num_classes=num_classes, weights=weights, progress=progress, save_embeddings=save_embeddings)
 
 
 class LightningResNet(L.LightningModule):
@@ -62,7 +62,7 @@ class LightningResNet(L.LightningModule):
     val_metric = "validation_ncs"
     train_metric = "train_ncs"
 
-    def __init__(self, num_classes, mode='classification', lr=0.01, step_size=2, gamma=0.1, planes=[8, 16, 32, 64], layers=[1, 1, 1, 1], block=BasicBlock, save_embeddings=False, label_type='time'):
+    def __init__(self, num_classes=1, mode='classification', lr=0.01, step_size=2, gamma=0.1, planes=[8, 16, 32, 64], layers=[1, 1, 1, 1], block=BasicBlock, save_embeddings=False, label_type='time'):
         super().__init__()
 
         weights = None 
@@ -78,8 +78,8 @@ class LightningResNet(L.LightningModule):
             raise ValueError(f"Unknown label type: {label_type}. Expected one of {list(self.loss_functions.keys())}")
         
         self.mode = mode
-        self.backbone = resnet(weights=None, progress=True, block=block, layers=layers, planes=planes, num_classes=num_classes, save_embeddings=save_embeddings)
-        if label_type == 'time':
+        self.backbone = resnet(weights=None, progress=True, mode=mode, block=block, layers=layers, planes=planes, num_classes=num_classes, save_embeddings=save_embeddings)
+        if label_type == 'time' and self.mode == 'regression':
             self.backbone = nn.Sequential(self.backbone, nn.Softplus(), nn.Flatten(start_dim=0))
         self.criterion = self.loss_functions[label_type]
         self.save_hyperparameters()
@@ -423,20 +423,19 @@ def predict(argv=None):
     predictions = trainer.predict(model, predict_loader)
     predictions = torch.cat(predictions).numpy()
 
-    pred_values = predictions.flatten()
-
-    logger.info("Regression Predictions:")
-
     if args.save_embeddings:
         logger.info("No classifier mode: Saving embeddings")
         out_data = dict(predictions=predictions)
         label_types = None
     else:
-        logger.info("Classifier mode: Saving predictions")
-        pred_labels = np.argmax(predictions, axis=0)
+        logger.info("Classifier mode: Saving predictions using classification / regression")
+        #pred_labels = np.argmax(predictions, axis=0)
 
         if true_labels is not None:
             if mode == 'classification':
+                    logger.info("mode:classification")
+                    pred_labels = np.argmax(predictions, axis=1)
+
                     accuracy = accuracy_score(true_labels, pred_labels)
                     precision = precision_score(true_labels, pred_labels, average='weighted')
                     recall = recall_score(true_labels, pred_labels, average='weighted')
@@ -452,6 +451,10 @@ def predict(argv=None):
                     out_data['correct_incorrect'] = correct_incorrect
 
             elif mode == 'regression': 
+                    logger.info("mode:regression")
+                    pred_labels = np.argmax(predictions, axis=0)
+                    pred_values = predictions.flatten()
+
                     mse = mean_squared_error(true_labels, pred_values)
                     mae = mean_absolute_error(true_labels, pred_values)
                     r2 = r2_score(true_labels, pred_values)
@@ -480,7 +483,7 @@ def predict(argv=None):
 
     np.savez(args.output_npz, **out_data)
 
-    logger.info(f"Predictions and residuals saved to {args.output_npz}")
+    logger.info(f"Results saved to {args.output_npz}")
 
 
 if __name__ == '__main__':

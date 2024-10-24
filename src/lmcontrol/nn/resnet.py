@@ -16,10 +16,11 @@ from torchvision.models._utils import _ovewrite_named_param, handle_legacy_inter
 class ResNet(nn.Module):
     def __init__(
         self,
+        mode: str,
         block: Type[Union[BasicBlock, Bottleneck]],
         layers: List[int],
         planes: List[int],
-        num_classes: int = 1, 
+        num_classes: int, 
         zero_init_residual: bool = False,
         groups: int = 1,
         width_per_group: int = 64,
@@ -71,7 +72,13 @@ class ResNet(nn.Module):
         idx = max(i for i in range(len(layers)) if layers[i] != 0)
         n_features = planes[idx] * expansion[idx]
 
-        self.fc = nn.Linear(n_features, 1)  #new added from above
+        # add loop using self
+        if mode == 'classification':
+            self.fc = nn.Linear(n_features, num_classes)
+        elif mode == 'regression':
+            self.fc = nn.Linear(n_features, 1)
+        else:
+            raise ValueError("modemust be either 'classification' or 'regression'")
         
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -160,6 +167,7 @@ class ResNet(nn.Module):
         return self._forward_impl(x)
 
 def _resnet(
+    mode: str,
     block: Type[Union[BasicBlock, Bottleneck]],
     layers: List[int],
     planes: List[int],
@@ -172,7 +180,7 @@ def _resnet(
     if weights is not None:
         _ovewrite_named_param(kwargs, "num_classes", len(weights.meta["categories"]))
         
-    model = ResNet(block=block, layers=layers, planes=planes, num_classes=num_classes, save_embeddings=save_embeddings)
+    model = ResNet(mode=mode, block=block, layers=layers, planes=planes, num_classes=num_classes, save_embeddings=save_embeddings)
 
     if weights is not None:
         model.load_state_dict(weights.get_state_dict(progress=progress, check_hash=True))
