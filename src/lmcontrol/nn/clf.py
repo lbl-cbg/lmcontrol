@@ -70,6 +70,7 @@ class LightningResNet(L.LightningModule):
 
         self.loss_functions = {
             'time': nn.MSELoss(),
+            'sample': nn.CrossEntropyLoss(),
             'condition': nn.CrossEntropyLoss(),
             'feed': nn.CrossEntropyLoss(),  
             'starting media': nn.CrossEntropyLoss()  
