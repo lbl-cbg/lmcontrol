@@ -131,7 +131,7 @@ class LightningResNet(L.LightningModule):
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[10, 20, 30], gamma=self.gamma)
         return [optimizer], [scheduler]
 
-    def predict_step(self, batch, batch_idx, dataloader_idx=0):  #Read the pytorch documentation to understand how its used
+    def predict_step(self, batch, batch_idx, dataloader_idx=0):  
         x = batch[0]
         return self.forward(x)
 
@@ -156,7 +156,7 @@ def get_layers(layers_cmd):
     return layers
 
 def _add_training_args(parser):
-    parser.add_argument('labels', type=str, help="the label to train with") #Let us currently only work with single label. We will add other labels in future (Andrew)
+    parser.add_argument('labels', type=str, help="the label to train with")
     parser.add_argument("--mode", type = str, help="Mode of prediction: classification/regression")
     parser.add_argument("--training", type=str, nargs='+', required=True, help="directories containing training data")
 
@@ -342,7 +342,7 @@ def objective(args, trial):
     l = trial.suggest_categorical('layers', ['1', '2', '3', '4'])  
     args.layers = get_layers(l)
 
-    args.outdir = os.path.join(args.working_dir, "logs")   ### outdir referrenced here 
+    args.outdir = os.path.join(args.working_dir, "logs")   
     args.experiment = f"trial_{trial.number:04d}"
 
     train_loader, val_loader, model = _get_loaders_and_model(args)
@@ -368,7 +368,7 @@ def tune(argv=None):
     pkl = os.path.join(args.working_dir, "args.pkl")
     db = os.path.join(args.working_dir, "study.db")
     if not os.path.exists(pkl) or args.restart:
-        os.makedirs(args.working_dir, exist_ok=True) #adding this exist_ok check for the pre existence of file 
+        os.makedirs(args.working_dir, exist_ok=True) 
         with open(pkl, 'wb') as file:
             pickle.dump(args, file)
         if args.restart and os.path.exists(db):
@@ -386,7 +386,7 @@ def tune(argv=None):
 
 def predict(argv=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument('labels', type=str, help="the label to predict with")  # Currently only for single label
+    parser.add_argument('labels', type=str, help="the label to predict with")  
     parser.add_argument("--mode", type = str, help="Mode of prediction: classification/regression")
     parser.add_argument("--prediction", type=str, nargs='+', required=True, help="directories containing prediction data")
     parser.add_argument("-c", "--checkpoint", type=str, help="path to the model checkpoint file to use for inference")
@@ -430,7 +430,6 @@ def predict(argv=None):
         label_types = None
     else:
         logger.info("Classifier mode: Saving predictions using classification / regression")
-        #pred_labels = np.argmax(predictions, axis=0)
 
         if true_labels is not None:
             if mode == 'classification':
