@@ -10,7 +10,7 @@ def write_npz(path, images, masks, paths, **metadata):
 
 # make label_types a string (Andrew)
 
-def load_npzs(npzs, logger, n=None, label_types=None):
+def load_npzs(npzs, logger, n_samples=None, label_types=None):
     """Load data from NPZ files generated from lmcontrol crop command"""
     masks = []
     images = []
