@@ -51,7 +51,7 @@ class ResNet(nn.Module):
         self.bn1 = norm_layer(self.inplanes)
         self.relu = nn.ReLU(inplace=True)
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-        self.return_embeddings = save_embeddings
+        self.return_embeddings = return_embeddings
 
         if planes is None:
             planes = [64, 128, 256, 512]
