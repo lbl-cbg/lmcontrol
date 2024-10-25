@@ -172,8 +172,6 @@ def _resnet(
     layers: List[int],
     planes: List[int],
     num_outputs: int,
-    weights: Optional[WeightsEnum],
-    progress: bool,
     save_embeddings: bool = False,
     **kwargs: Any,
 ) -> ResNet:
