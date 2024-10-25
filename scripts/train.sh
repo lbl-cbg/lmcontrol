@@ -9,7 +9,7 @@
 #SBATCH -e /pscratch/sd/n/niranjan/error/eo_report.%j #Note that doing this will save the erros and output to the same file ,and .j is the job number.
 #SBATCH -o /pscratch/sd/n/niranjan/error/eo_report.%j
 #SBATCH -J Run1
-
+INPUT_DIR="/pscratch/sd/n/niranjan/tar_ball/segmented_square_96"
 lmcontrol train-clf  \
     --training \
     /pscratch/sd/n/niranjan/tar_ball/segmented_square_96/S10/S10_HT1/all_processed.npz \
