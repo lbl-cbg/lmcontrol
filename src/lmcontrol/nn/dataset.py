@@ -70,7 +70,7 @@ class LMDataset(Dataset):
         Args:
             npzs (array-like)       : A list or tuple of paths to NPZ files containing cropped images
         """
-        self.mode = mode
+        self.mode = 'regression' if label_types == 'time' else 'classification'
 
         if not isinstance(npzs, (list, tuple, np.ndarray, torch.Tensor)):
             raise ValueError(f"Got unexpected type ({type(npzs)}) for argument 'npzs'. Must be an array-like")
