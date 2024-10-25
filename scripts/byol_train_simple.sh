@@ -10,7 +10,6 @@ lmcontrol train-byol \
     /pscratch/sd/n/niranjan/tar_ball/segmented_square_96/S14/S14_HT5/all_processed.npz \
     /pscratch/sd/n/niranjan/tar_ball/segmented_square_96/S4/S4_HT8/all_processed.npz \
     -o /pscratch/sd/n/niranjan/output/byol_output \
-    -c /pscratch/sd/n/niranjan/output/checkpoint/epoch=9-step=15550.ckpt \
     -e 3 \
     byol_testing0 \
     time
