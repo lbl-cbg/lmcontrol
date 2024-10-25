@@ -23,8 +23,8 @@ def load_npzs(npzs, logger, n_samples=None, label_types=None):
         
         total_samples = len(npz['masks'])
         
-        if n is not None and total_samples > n:
-            indices = np.random.permutation(total_samples)[:n]
+        if n is not None and total_samples > n_samples:
+            indices = np.random.permutation(total_samples)[:n_samples]
         else:
             indices = np.arange(total_samples)
         
