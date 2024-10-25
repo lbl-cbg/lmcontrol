@@ -78,7 +78,7 @@ class LMDataset(Dataset):
             raise ValueError("Got empty array-like for argument 'npzs'")
         logger = logger or get_logger('warning')
 
-        masks, images, paths, metadata = load_npzs(npzs, logger,n,label_types)
+        masks, images, paths, metadata = load_npzs(npzs, logger, n_samples, label_types)
         if use_masks:
             self.data = masks
         else:
