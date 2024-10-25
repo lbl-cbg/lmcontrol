@@ -175,8 +175,6 @@ def _resnet(
     return_embeddings: bool = False,
     **kwargs: Any,
 ) -> ResNet:
-    if weights is not None:
-        _ovewrite_named_param(kwargs, "num_classes", len(weights.meta["categories"]))
         
     model = ResNet(mode=mode, block=block, layers=layers, planes=planes, num_classes=num_classes, save_embeddings=save_embeddings)
 
