@@ -178,7 +178,5 @@ def _resnet(
         
     model = ResNet(mode=mode, block=block, layers=layers, planes=planes, num_outputs=num_outputs, save_embeddings=save_embeddings)
 
-    if weights is not None:
-        model.load_state_dict(weights.get_state_dict(progress=progress, check_hash=True))
 
     return model
