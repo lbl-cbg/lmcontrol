@@ -165,18 +165,3 @@ class ResNet(nn.Module):
 
     def forward(self, x: Tensor) -> Tensor:
         return self._forward_impl(x)
-
-def _resnet(
-    label_type: 'str',
-    block: Type[Union[BasicBlock, Bottleneck]],
-    layers: List[int],
-    planes: List[int],
-    num_outputs: int,
-    return_embeddings: bool = False,
-    **kwargs: Any,
-) -> ResNet:
-        
-    model = ResNet(label_type=label_type, block=block, layers=layers, planes=planes, num_outputs=num_outputs, return_embeddings=return_embeddings)
-
-
-    return model

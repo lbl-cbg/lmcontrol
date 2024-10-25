@@ -138,7 +138,6 @@ class LMDataset(Dataset):
         if self.transform is not None:
             ret = self.transform(ret)
         labels = -1 if self.labels is None else self.labels[i]
-
         return ret, labels
 
     def __len__(self):

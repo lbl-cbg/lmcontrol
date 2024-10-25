@@ -33,28 +33,7 @@ from optuna.integration import PyTorchLightningPruningCallback
 from ..utils import get_logger
 from ..data_utils import load_npzs, encode_labels
 from .dataset import LMDataset, get_transforms as _get_transforms
-from lmcontrol.nn.resnet import _resnet  
-
-def resnet(*,weights=None, progress=True,label_type=None, block=None, layers=None, planes=None,num_outputs=None, return_embeddings=None) :
-    """ResNet-18 from `Deep Residual Learning for Image Recognition <https://arxiv.org/abs/1512.03385>`__.
-
-    Args:
-        weights (:class:`~torchvision.models.ResNet18_Weights`, optional): The
-            pretrained weights to use. See
-            :class:`~torchvision.models.ResNet18_Weights` below for
-            more details, and possible values. By default, no pre-trained
-            weights are used.
-        progress (bool, optional): If True, displays a progress bar of the
-            download to stderr. Default is True.
-        **kwargs: parameters passed to the ``torchvision.models.resnet.ResNet``
-            base class. Please refer to the `source code
-            <https://github.com/pytorch/vision/blob/main/torchvision/models/resnet.py>`_
-            for more details about this class.
-
-    .. autoclass:: torchvision.models.ResNet18_Weights
-        :members:
-    """
-    return _resnet(label_type=label_type, block=block, layers=layers, planes=planes, num_outputs=num_outputs, weights=weights, progress=progress, return_embeddings=return_embeddings)
+from lmcontrol.nn.resnet import ResNet
 
 
 class LightningResNet(L.LightningModule):
@@ -78,7 +57,7 @@ class LightningResNet(L.LightningModule):
         if label_type not in self.loss_functions:
             raise ValueError(f"Unknown label type: {label_type}. Expected one of {list(self.loss_functions.keys())}")
         
-        self.backbone = resnet(weights=None, progress=True, label_type=label_type, block=block, layers=layers, planes=planes, num_outputs=num_outputs, return_embeddings=return_embeddings)
+        self.backbone = ResNet(label_type=label_type, block=block, layers=layers, planes=planes, num_outputs=num_outputs, return_embeddings=return_embeddings)```
         if label_type == 'time':
             self.backbone = nn.Sequential(self.backbone, nn.Softplus(), nn.Flatten(start_dim=0))
         self.criterion = self.loss_functions[label_type]
