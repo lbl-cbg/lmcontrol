@@ -172,7 +172,7 @@ def _resnet(
     layers: List[int],
     planes: List[int],
     num_outputs: int,
-    save_embeddings: bool = False,
+    return_embeddings: bool = False,
     **kwargs: Any,
 ) -> ResNet:
     if weights is not None:
