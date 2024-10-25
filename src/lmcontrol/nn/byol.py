@@ -234,19 +234,6 @@ def predict(argv=None):
     predictions = torch.cat(predictions).numpy()
 
     out_data = dict(predictions=predictions, true_labels = true_labels)
-    
-    # print(predictions.shape)  
-    # print(true_labels.shape)
-
-
-    clf = LogisticRegression(max_iter=1000) 
-    clf.fit(predictions, true_labels)
-
-    predicted_labels = clf.predict(predictions)
-
-    # accuracy
-    accuracy = accuracy_score(true_labels, predicted_labels)
-    print(f"Accuracy: {accuracy:.4f}")
 
     if not args.pred_only:
         dset = predict_dataset
