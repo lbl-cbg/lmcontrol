@@ -1,3 +1,5 @@
+INPUT_DIR=${1:?"Please provide the input data directory"}
+OUTPUT_DIR=${2:?"Please provide the directory to save results to"}
 lmcontrol train-clf \
     --training \
     /pscratch/sd/n/niranjan/tar_ball/segmented_square_96/S10/S10_HT1/all_processed.npz \
