@@ -26,9 +26,9 @@ def main():
             
         },
         'Supervised Learning':{
-            'opta-tune': Command('nn.clf.tune', 'Optatune used code for tune function'),
-            'opta-clf-train': Command('nn.clf.train', 'Optatune Train used code for tune function'),
-            'opta-clf-predict': Command('nn.clf.predict', 'Optatune Predict used code for tune function')
+            'tune': Command('nn.clf.tune', 'Run HPO for classifier or regressor with Optuna'),
+            'sup-train': Command('nn.clf.train', 'Train classifier or regressor to predict bioreactor properties from images'),
+            'sup-predict': Command('nn.clf.predict', 'Predict bioreactor properties from images using trained model')
         },
     }
     import sys
