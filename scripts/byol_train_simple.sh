@@ -1,4 +1,3 @@
-
 INPUT_DIR=${1:?"Please provide the input data directory"};
 OUTPUT_DIR=${2:?"Please provide the directory to save results to"};
 lmcontrol train-byol \
