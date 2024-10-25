@@ -196,7 +196,6 @@ def train(argv=None):
 def predict(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument('labels', type=str, help="the label to predict with")
-    parser.add_argument("-c","--checkpoint", type=str, help="path to the model checkpoint file to use for inference")
     # add argument for passing in NPZ files for doing predictions on:DONE
     parser.add_argument("--prediction", type=str, nargs='+', required=True, help="directories containing prediction data")
     parser.add_argument("-o","--output_npz", type=str, help="the path to save the embeddings to. Saved in NPZ format")
