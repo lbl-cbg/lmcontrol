@@ -65,20 +65,20 @@ class Norm(T._transform.Transform):
 
 class LMDataset(Dataset):
 
-    def __init__(self, npzs, mode=None, use_masks=False, return_labels=False, logger=None, transform=None, label_types=None, n_samples=None, return_embeddings=None, split=None, val_size=None, seed=None):
+    def __init__(self, npzs, use_masks=False, return_labels=False, logger=None, transform=None, label_type=None, n_samples=None, return_embeddings=None, split=None, val_size=None, seed=None):
         """
         Args:
             npzs (array-like)       : A list or tuple of paths to NPZ files containing cropped images
         """
-        self.mode = 'regression' if label_types == 'time' else 'classification'
-
         if not isinstance(npzs, (list, tuple, np.ndarray, torch.Tensor)):
             raise ValueError(f"Got unexpected type ({type(npzs)}) for argument 'npzs'. Must be an array-like")
         elif len(npzs) == 0:
             raise ValueError("Got empty array-like for argument 'npzs'")
         logger = logger or get_logger('warning')
 
-        masks, images, paths, metadata = load_npzs(npzs, logger, n_samples, label_types)
+        mode = 'regression' if label_type == 'time' else 'classification'
+
+        masks, images, paths, metadata = load_npzs(npzs, logger, n_samples, label_type)
         if use_masks:
             self.data = masks
         else:
@@ -88,25 +88,25 @@ class LMDataset(Dataset):
         self.transform = transform
 
 
-        if not isinstance(label_types, (tuple, list)):
-            label_types = [label_types]
+        if not isinstance(label_type, (tuple, list)):
+            label_type = [label_type]
 
         self.labels = None
         self.label_classes = None
-        self.label_types = None
+        self.label_type = None
         if return_labels:
             tmp = list()
-            self.label_types = list()
+            self.label_type = list()
             self.label_classes = list()
             for k in metadata:
                 if not return_embeddings:           
-                    if k not in label_types:
+                    if k not in label_type:
                         continue
-                self.label_types.append(k)
-                if self.mode == 'regression':
-                    labels = encode_labels(mode, metadata[k])  
-                elif self.mode == 'classification':     
-                    labels, classes = encode_labels(mode, metadata[k])
+                self.label_type.append(k)
+                if mode == 'regression':
+                    labels = encode_labels(metadata[k], label_type)  
+                elif mode == 'classification':     
+                    labels, classes = encode_labels(metadata[k], label_type)
                     self.label_classes.append(classes)
                 else:
                     raise ValueError("task_type must be either 'classification' or 'regression'")

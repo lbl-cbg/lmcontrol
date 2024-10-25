@@ -16,7 +16,7 @@ from torchvision.models._utils import _ovewrite_named_param, handle_legacy_inter
 class ResNet(nn.Module):
     def __init__(
         self,
-        mode: str,
+        label_type: 'str',
         block: Type[Union[BasicBlock, Bottleneck]],
         layers: List[int],
         planes: List[int],
@@ -73,12 +73,12 @@ class ResNet(nn.Module):
         n_features = planes[idx] * expansion[idx]
 
         # add loop using self
-        if mode == 'classification':
+        if label_type != 'time':
             self.fc = nn.Linear(n_features, num_outputs)
-        elif mode == 'regression':
+        elif label_type == 'time':
             self.fc = nn.Linear(n_features, 1)
         else:
-            raise ValueError("modemust be either 'classification' or 'regression'")
+            raise ValueError("mode must be either 'classification' or 'regression'")
         
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -167,7 +167,7 @@ class ResNet(nn.Module):
         return self._forward_impl(x)
 
 def _resnet(
-    mode: str,
+    label_type: 'str',
     block: Type[Union[BasicBlock, Bottleneck]],
     layers: List[int],
     planes: List[int],
@@ -176,7 +176,7 @@ def _resnet(
     **kwargs: Any,
 ) -> ResNet:
         
-    model = ResNet(mode=mode, block=block, layers=layers, planes=planes, num_outputs=num_outputs, return_embeddings=return_embeddings)
+    model = ResNet(label_type=label_type, block=block, layers=layers, planes=planes, num_outputs=num_outputs, return_embeddings=return_embeddings)
 
 
     return model

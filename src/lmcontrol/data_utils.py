@@ -8,9 +8,9 @@ from .utils import get_logger
 def write_npz(path, images, masks, paths, **metadata):
     np.savez(path, masks=masks, images=images, paths=paths, **metadata)
 
-# make label_types a string (Andrew)
+# make label_type a string (Andrew)
 
-def load_npzs(npzs, logger, n_samples=None, label_types=None):
+def load_npzs(npzs, logger, n_samples=None, label_type=None):
     """Load data from NPZ files generated from lmcontrol crop command"""
     masks = []
     images = []
@@ -57,16 +57,21 @@ def load_npzs(npzs, logger, n_samples=None, label_types=None):
             raise ValueError(f"Metadata '{k}' length mismatch: expected {target_len}, got {len(metadata[k])}")
     return masks, images, paths, metadata
 
-def encode_labels(mode, labels, return_classes=True):
+def encode_labels(labels, label_type, return_classes=True):
     """This is a wrapper for sklearn.preprocessing.LabelEncoder"""
     enc = LabelEncoder().fit(labels)
-    if mode == 'classification':
+
+    if isinstance(label_type, list):
+        label_type = label_type[0]
+    label_type = label_type.strip()
+
+    if label_type != 'time':
         if return_classes:
             return enc.transform(labels), enc.classes_
         else:
             return enc.transform(labels)
-    elif mode == 'regression':
+    elif label_type == 'time':
         labels = np.array(labels, dtype=np.float32)
         return labels
     else:
-        raise ValueError("mode must be either 'classification' or 'regression'")
+        raise ValueError("Unrecognised label type")

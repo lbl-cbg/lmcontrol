@@ -14,46 +14,48 @@
 # Assign custom name (SLURM_ARRAY_TASK_ID is replaced with the custom name)
 task_name="10_22_00_00"
 
+INPUT_DIR="/pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR"
+
 # Run the script with the task_name
 lmcontrol opta-clf-train \
     --training \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S1/S1_HT2/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S1/S1_HT7/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S1/S1_HT10/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S6/S6_HT2/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S6/S6_HT7/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S6/S6_HT10/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S15/S15_HT2/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S15/S15_HT7/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S15/S15_HT10/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S24/S24_HT2/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S24/S24_HT7/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S24/S24_HT10/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S27/S27_HT2/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S27/S27_HT7/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S27/S27_HT10/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S28/S28_HT2/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S28/S28_HT7/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S28/S28_HT10/all_processed.npz \
+    $INPUT_DIR/S1/S1_HT2/all_processed.npz \
+    $INPUT_DIR/S1/S1_HT7/all_processed.npz \
+    $INPUT_DIR/S1/S1_HT10/all_processed.npz \
+    $INPUT_DIR/S6/S6_HT2/all_processed.npz \
+    $INPUT_DIR/S6/S6_HT7/all_processed.npz \
+    $INPUT_DIR/S6/S6_HT10/all_processed.npz \
+    $INPUT_DIR/S15/S15_HT2/all_processed.npz \
+    $INPUT_DIR/S15/S15_HT7/all_processed.npz \
+    $INPUT_DIR/S15/S15_HT10/all_processed.npz \
+    $INPUT_DIR/S24/S24_HT2/all_processed.npz \
+    $INPUT_DIR/S24/S24_HT7/all_processed.npz \
+    $INPUT_DIR/S24/S24_HT10/all_processed.npz \
+    $INPUT_DIR/S27/S27_HT2/all_processed.npz \
+    $INPUT_DIR/S27/S27_HT7/all_processed.npz \
+    $INPUT_DIR/S27/S27_HT10/all_processed.npz \
+    $INPUT_DIR/S28/S28_HT2/all_processed.npz \
+    $INPUT_DIR/S28/S28_HT7/all_processed.npz \
+    $INPUT_DIR/S28/S28_HT10/all_processed.npz \
     --validation \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S1/S1_HT4/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S1/S1_HT8/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S1/S1_HT11/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S6/S6_HT4/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S6/S6_HT8/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S6/S6_HT11/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S15/S15_HT4/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S15/S15_HT8/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S15/S15_HT11/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S24/S24_HT4/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S24/S24_HT8/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S24/S24_HT11/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S27/S27_HT4/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S27/S27_HT8/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S27/S27_HT11/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S28/S28_HT4/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S28/S28_HT8/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S28/S28_HT11/all_processed.npz \
+    $INPUT_DIR/S1/S1_HT4/all_processed.npz \
+    $INPUT_DIR/S1/S1_HT8/all_processed.npz \
+    $INPUT_DIR/S1/S1_HT11/all_processed.npz \
+    $INPUT_DIR/S6/S6_HT4/all_processed.npz \
+    $INPUT_DIR/S6/S6_HT8/all_processed.npz \
+    $INPUT_DIR/S6/S6_HT11/all_processed.npz \
+    $INPUT_DIR/S15/S15_HT4/all_processed.npz \
+    $INPUT_DIR/S15/S15_HT8/all_processed.npz \
+    $INPUT_DIR/S15/S15_HT11/all_processed.npz \
+    $INPUT_DIR/S24/S24_HT4/all_processed.npz \
+    $INPUT_DIR/S24/S24_HT8/all_processed.npz \
+    $INPUT_DIR/S24/S24_HT11/all_processed.npz \
+    $INPUT_DIR/S27/S27_HT4/all_processed.npz \
+    $INPUT_DIR/S27/S27_HT8/all_processed.npz \
+    $INPUT_DIR/S27/S27_HT11/all_processed.npz \
+    $INPUT_DIR/S28/S28_HT4/all_processed.npz \
+    $INPUT_DIR/S28/S28_HT8/all_processed.npz \
+    $INPUT_DIR/S28/S28_HT11/all_processed.npz \
     --checkpoint /pscratch/sd/n/niranjan/output/optatune/opta_${task_name}/ \
     --epochs 5 \
     --outdir /pscratch/sd/n/niranjan/output/optatune/opta_${task_name}/ \
@@ -72,24 +74,24 @@ best_ckpt_path="/pscratch/sd/n/niranjan/output/optatune/opta_${task_name}/$best_
 # Run the prediction step using the best checkpoint
 lmcontrol opta-clf-predict \
     --prediction \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S1/S1_HT5/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S1/S1_HT9/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S1/S1_HT12/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S6/S6_HT5/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S6/S6_HT9/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S6/S6_HT12/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S15/S15_HT5/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S15/S15_HT9/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S15/S15_HT12/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S24/S24_HT5/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S24/S24_HT9/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S24/S24_HT12/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S27/S27_HT5/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S27/S27_HT9/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S27/S27_HT12/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S28/S28_HT5/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S28/S28_HT9/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR/S28/S28_HT12/all_processed.npz \
+    $INPUT_DIR/S1/S1_HT5/all_processed.npz \
+    $INPUT_DIR/S1/S1_HT9/all_processed.npz \
+    $INPUT_DIR/S1/S1_HT12/all_processed.npz \
+    $INPUT_DIR/S6/S6_HT5/all_processed.npz \
+    $INPUT_DIR/S6/S6_HT9/all_processed.npz \
+    $INPUT_DIR/S6/S6_HT12/all_processed.npz \
+    $INPUT_DIR/S15/S15_HT5/all_processed.npz \
+    $INPUT_DIR/S15/S15_HT9/all_processed.npz \
+    $INPUT_DIR/S15/S15_HT12/all_processed.npz \
+    $INPUT_DIR/S24/S24_HT5/all_processed.npz \
+    $INPUT_DIR/S24/S24_HT9/all_processed.npz \
+    $INPUT_DIR/S24/S24_HT12/all_processed.npz \
+    $INPUT_DIR/S27/S27_HT5/all_processed.npz \
+    $INPUT_DIR/S27/S27_HT9/all_processed.npz \
+    $INPUT_DIR/S27/S27_HT12/all_processed.npz \
+    $INPUT_DIR/S28/S28_HT5/all_processed.npz \
+    $INPUT_DIR/S28/S28_HT9/all_processed.npz \
+    $INPUT_DIR/S28/S28_HT12/all_processed.npz \
     --checkpoint $best_ckpt_path \
     -o /pscratch/sd/n/niranjan/output/prediction_${task_name}.npz \
     -n 95 \
