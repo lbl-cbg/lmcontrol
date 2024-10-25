@@ -14,24 +14,24 @@
 # Assign custom name (SLURM_ARRAY_TASK_ID is replaced with the custom name)
 task_name="test_10_23_01_00"
 
-# # Run the script with the task_name
-lmcontrol opta-clf-train \
-    --mode regression \
-    --training \
-    /pscratch/sd/n/niranjan/tar_ball/segmented_square_96/S4/S4_HT1/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/segmented_square_96/S4/S4_HT4/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/segmented_square_96/S4/S4_HT7/all_processed.npz \
-    --validation \
-    /pscratch/sd/n/niranjan/tar_ball/segmented_square_96/S4/S4_HT2/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/segmented_square_96/S4/S4_HT5/all_processed.npz \
-    /pscratch/sd/n/niranjan/tar_ball/segmented_square_96/S4/S4_HT8/all_processed.npz \
-    --checkpoint /pscratch/sd/n/niranjan/output/optatune/opta_${task_name}/ \
-    --epochs 5 \
-    --outdir /pscratch/sd/n/niranjan/output/optatune/opta_${task_name}/ \
-    --stop_wandb \
-    -n 100 \
-    testing0 \
-    time
+# # # Run the script with the task_name
+# lmcontrol sup-train \
+#     --mode classification \
+#     --training \
+#     /pscratch/sd/n/niranjan/tar_ball/segmented_square_96/S4/S4_HT1/all_processed.npz \
+#     /pscratch/sd/n/niranjan/tar_ball/segmented_square_96/S4/S4_HT4/all_processed.npz \
+#     /pscratch/sd/n/niranjan/tar_ball/segmented_square_96/S4/S4_HT7/all_processed.npz \
+#     --validation \
+#     /pscratch/sd/n/niranjan/tar_ball/segmented_square_96/S4/S4_HT2/all_processed.npz \
+#     /pscratch/sd/n/niranjan/tar_ball/segmented_square_96/S4/S4_HT5/all_processed.npz \
+#     /pscratch/sd/n/niranjan/tar_ball/segmented_square_96/S4/S4_HT8/all_processed.npz \
+#     --checkpoint /pscratch/sd/n/niranjan/output/optatune/opta_${task_name}/ \
+#     --epochs 5 \
+#     --outdir /pscratch/sd/n/niranjan/output/optatune/opta_${task_name}/ \
+#     --stop_wandb \
+#     -n 100 \
+#     testing0 \
+#     sample
 
 
 # training
@@ -66,8 +66,8 @@ best_ckpt=$(ls /pscratch/sd/n/niranjan/output/optatune/opta_${task_name}/ | \
 best_ckpt_path="/pscratch/sd/n/niranjan/output/optatune/opta_${task_name}/$best_ckpt"
 
 # Run the prediction step using the best checkpoint
-lmcontrol opta-clf-predict \
-    --mode regression \
+lmcontrol sup-predict \
+    --mode classification \
     --prediction \
     /pscratch/sd/n/niranjan/tar_ball/segmented_square_96/S4/S4_HT3/all_processed.npz \
     /pscratch/sd/n/niranjan/tar_ball/segmented_square_96/S4/S4_HT6/all_processed.npz \
@@ -75,7 +75,7 @@ lmcontrol opta-clf-predict \
     --checkpoint $best_ckpt_path \
     -o /pscratch/sd/n/niranjan/output/prediction_${task_name}.npz \
     -n 100 \
-    time \
+    sample \
     # -save_emb \
     # --save_misclassified /pscratch/sd/n/niranjan/output/optatune/ambr01_misclassify/misclassified_${task_name} \
     # --save_confusion /pscratch/sd/n/niranjan/output/optatune/ambr01_misclassify/

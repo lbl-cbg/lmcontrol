@@ -74,7 +74,7 @@ class ResNet(nn.Module):
 
         # add loop using self
         if mode == 'classification':
-            self.fc = nn.Linear(n_features, num_classes)
+            self.fc = nn.Linear(n_features, num_outputs)
         elif mode == 'regression':
             self.fc = nn.Linear(n_features, 1)
         else:
@@ -176,7 +176,7 @@ def _resnet(
     **kwargs: Any,
 ) -> ResNet:
         
-    model = ResNet(mode=mode, block=block, layers=layers, planes=planes, num_outputs=num_outputs, save_embeddings=save_embeddings)
+    model = ResNet(mode=mode, block=block, layers=layers, planes=planes, num_outputs=num_outputs, return_embeddings=return_embeddings)
 
 
     return model
