@@ -20,7 +20,7 @@ class ResNet(nn.Module):
         block: Type[Union[BasicBlock, Bottleneck]],
         layers: List[int],
         planes: List[int],
-        num_classes: int, 
+        num_outputs: int, 
         zero_init_residual: bool = False,
         groups: int = 1,
         width_per_group: int = 64,
