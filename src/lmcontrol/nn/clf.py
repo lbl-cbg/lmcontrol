@@ -156,7 +156,7 @@ def get_layers(layers_cmd):
     return layers
 
 def _add_training_args(parser):
-    parser.add_argument('labels', type=str, help="the label to train with")
+    parser.add_argument('labels', type=str, choices=['time', 'feed', 'starting_media', 'condition'], help="the label to train with")
     parser.add_argument("--training", type=str, nargs='+', required=True, help="directories containing training data")
 
     grp = parser.add_mutually_exclusive_group()
@@ -184,7 +184,7 @@ def _get_loaders_and_model(args,  logger=None):
     transform_train = _get_transforms('float', 'norm','blur','rotate', 'crop','hflip', 'vflip', 'noise', 'rgb') 
     transform_val = _get_transforms('float', 'norm','blur','rotate', 'crop','hflip', 'vflip', 'noise', 'rgb')                                                        
 
-    mode = args.mode
+    mode = 'regression' if labels == 'time' else 'classification'
 
     if args.val_frac:
         split_files = args.training
@@ -228,7 +228,7 @@ def _get_loaders_and_model(args,  logger=None):
             logger.info(val_dataset.label_types[i] + " - " + str(torch.unique(val_dataset.labels[:, i])) + str(val_dataset.label_classes))
 
     else:
-        print("You must specify --validation or --val_frac", file=sys.sterr)
+        print("You must specify --validation or --val_frac", file=sys.stderr)
         exit(1)
 
     num_workers = 0 if args.debug else 4
@@ -255,7 +255,7 @@ def _get_trainer(args, trial=None):
     callbacks = []
 
     targs = dict(max_epochs=args.epochs, devices=1, accelerator=accelerator, check_val_every_n_epoch=4, callbacks=callbacks)
-    mode = args.mode
+    mode = 'regression' if labels == 'time' else 'classification'
     if mode == 'classification':
         if args.early_stopping:
             early_stopping = EarlyStopping(
@@ -386,7 +386,6 @@ def tune(argv=None):
 def predict(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument('labels', type=str, help="the label to predict with")  
-    parser.add_argument("--mode", type = str, help="Mode of prediction: classification/regression")
     parser.add_argument("--prediction", type=str, nargs='+', required=True, help="directories containing prediction data")
     parser.add_argument("-c", "--checkpoint", type=str, help="path to the model checkpoint file to use for inference")
     parser.add_argument("-o", "--output_npz", type=str, help="the path to save the embeddings to. Saved in NPZ format")
@@ -398,10 +397,10 @@ def predict(argv=None):
 
     args = parser.parse_args(argv)
 
-    mode = args.mode
+    mode = 'regression' if labels == 'time' else 'classification'
 
     logger = get_logger('info')
-    transform = _get_transforms('float', 'norm', 'blur', 'rotate', 'crop', 'hflip', 'vflip', 'noise', 'rgb')
+    transform = _get_transforms('float', 'norm', 'crop', 'rgb')
 
     predict_files = args.prediction
     n = args.n_samples
