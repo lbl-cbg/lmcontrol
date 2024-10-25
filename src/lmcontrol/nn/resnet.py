@@ -171,7 +171,7 @@ def _resnet(
     block: Type[Union[BasicBlock, Bottleneck]],
     layers: List[int],
     planes: List[int],
-    num_classes: int,
+    num_outputs: int,
     weights: Optional[WeightsEnum],
     progress: bool,
     save_embeddings: bool = False,
