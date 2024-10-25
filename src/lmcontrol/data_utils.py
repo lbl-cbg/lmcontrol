@@ -26,7 +26,7 @@ def load_npzs(npzs, logger, n_samples=None, label_types=None):
         if n is not None and total_samples > n_samples:
             indices = np.random.permutation(total_samples)[:n_samples]
         else:
-            indices = np.arange(total_samples)
+            indices = np.s_[:]
         
         masks.append(npz['masks'][indices])
         images.append(npz['images'][indices])
