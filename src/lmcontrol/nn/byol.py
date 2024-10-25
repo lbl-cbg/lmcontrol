@@ -20,14 +20,6 @@ from lightly.utils.scheduler import cosine_schedule
 
 from ..utils import get_logger
 from .dataset import get_lightly_dataset, get_transforms as _get_transforms
-from .dataset import LMDataset, get_transforms as _get_transforms
-
-
-from sklearn.metrics import accuracy_score, precision_score, recall_score, confusion_matrix
-from lightning.pytorch.callbacks import EarlyStopping
-
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score
 
 
 class BYOL(L.LightningModule):
@@ -58,9 +50,6 @@ class BYOL(L.LightningModule):
         self.projection_head = BYOLProjectionHead(n_features, 1024, 256)
         self.prediction_head = BYOLPredictionHead(256, 1024, 256)
 
-        # self.classification_head = nn.Linear(256, num_classes)  # Define the number of classes
-
-
         self.backbone_momentum = copy.deepcopy(self.backbone)
         self.projection_head_momentum = copy.deepcopy(self.projection_head)
 
@@ -68,13 +57,11 @@ class BYOL(L.LightningModule):
         deactivate_requires_grad(self.projection_head_momentum)
 
         self.criterion = NegativeCosineSimilarity()
-        self.save_hyperparameters()
 
     def forward(self, x):
         y = self.backbone(x).flatten(start_dim=1)
         z = self.projection_head(y)
         p = self.prediction_head(z)
-        #logits = self.classification_head(y) ####
         return p
 
     def forward_momentum(self, x):
@@ -106,7 +93,7 @@ class BYOL(L.LightningModule):
         self.log(self.val_metric, loss, batch_size=x0.size(0))
         return loss
 
-    def predict_step(self, batch, batch_idx, dataloader_idx=0):  #.predict function automatically call this
+    def predict_step(self, batch, batch_idx, dataloader_idx=0):
         x = batch[0]
         return self.backbone(x).flatten(start_dim=1)
 
@@ -138,9 +125,8 @@ def get_transform(transform1=None, transform2=None):
 def train(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("experiment", type=str, help="the experiment name")
-    parser.add_argument('labels', type=str, help="the label to train with")
-    parser.add_argument("--training", type=str, nargs='+', required=True, help="directories containing training data")
-    parser.add_argument("--validation", type=str, nargs='+', required=True, help="directories containing validation data")
+    parser.add_argument("-T", "--training", nargs='+', type=str, help="the NPZs with cropped images to use for training")
+    parser.add_argument("-V", "--validation", nargs='+', type=str, help="the NPZs with cropped images to use for validation")
     parser.add_argument("-o", "--outdir", type=str, help="the directory to save output to", default='.')
     parser.add_argument("-c", "--checkpoint", type=str, help="checkpoint file to pick up from", default=None)
     parser.add_argument("-e", "--epochs", type=int, help="the number of epochs to run for", default=10)
@@ -150,20 +136,24 @@ def train(argv=None):
 
     logger = get_logger('info')
 
+    train_files = args.training
+    val_files = args.validation
+
+    if args.debug:
+        num_workers = 0
+    else:
+        num_workers = 3
+
     train_tfm = get_transform()
     val_tfm = get_transform(
             transform1=_get_transforms('float', 'norm', 'rotate', 'crop', 'hflip', 'vflip', 'rgb'),
             transform2=_get_transforms('float', 'norm', 'crop', 'rgb'),
             )
-    
-    train_files = args.training ##addition
-    val_files = args.validation
-    num_workers = 0 if args.debug else 4
 
     logger.info(f"Loading training data: {len(train_files)} files")
-    train_dataset = LMDataset(train_files, transform=train_tfm, logger=logger, return_labels=True, label_types=args.labels)
+    train_dataset = get_lightly_dataset(train_files, transform=train_tfm, logger=logger)
     logger.info(f"Loading validation data: {len(val_files)} files")
-    val_dataset = LMDataset(val_files, transform=val_tfm, logger=logger, return_labels=True, label_types=args.labels)
+    val_dataset = get_lightly_dataset(val_files, transform=val_tfm, logger=logger)
 
     model = BYOL()
 
@@ -191,9 +181,8 @@ def train(argv=None):
 
     trainer.fit(model=model, train_dataloaders=train_dl, val_dataloaders=val_dl)
 
-
-
 def predict(argv=None):
+
     parser = argparse.ArgumentParser()
     parser.add_argument('labels', type=str, help="the label to predict with")
     # add argument for passing in NPZ files for doing predictions on:DONE
@@ -202,54 +191,35 @@ def predict(argv=None):
     parser.add_argument("-d", "--debug", action='store_true', help="run with a small dataset", default=False)
     parser.add_argument("-p", "--pred-only", action='store_true', default=False,
                         help="only save predictions, otherwise save original image data and labels in output_npz")
-    # add argument for passing in boolean mask for predictions i.e. correct/incorrect predictions
-    parser.add_argument("--mask", action='store_true', default=False, 
-                        help="save  boolean masks for correct/incorrect predictions in output_npz")
 
     args = parser.parse_args(argv)
-    
+
     logger = get_logger('info')
 
-    predict_files = args.prediction
-    logger.info(f"Test files: {predict_files}")
+    test_files = args.input_npz
 
     transform = _get_transforms('float', 'norm', 'crop', 'rgb')
-    logger.info(f"Loading testing data: {len(predict_files)} files")
-    predict_dataset = LMDataset(predict_files, transform=transform, logger=logger, return_labels=True,label_types=args.labels)
+    logger.info(f"Loading training data: {len(test_files)} files")
+    test_dataset = get_lightly_dataset(test_files, transform=transform, logger=logger, return_labels=True)
 
-    for i in range(predict_dataset.labels.shape[1]):
-        logger.info(predict_dataset.label_types[i] + " - " + str(torch.unique(predict_dataset.labels[:, i])) + str(predict_dataset.label_classes))    
-
-    true_labels = predict_dataset.labels[:, 0].numpy()
-    true_labels = np.array(true_labels)  ##
-
-    predict_dl = DataLoader(predict_dataset, batch_size=512, shuffle=False, drop_last=False, num_workers=3)
+    test_dl = DataLoader(test_dataset, batch_size=512, shuffle=False, drop_last=False, num_workers=3)
 
     model = BYOL.load_from_checkpoint(args.checkpoint)
     accelerator = "gpu" if torch.cuda.is_available() else "cpu"
     trainer = L.Trainer(devices=1, accelerator=accelerator)
 
     logger.info("Running predictions witih Lightning")
-    predictions = trainer.predict(model, predict_dl)
+    predictions = trainer.predict(model, test_dl)
     predictions = torch.cat(predictions).numpy()
 
     out_data = dict(predictions=predictions, true_labels = true_labels)
 
     if not args.pred_only:
-        dset = predict_dataset
+        dset = test_dataset.dataset
         out_data['images'] = np.asarray(torch.squeeze(dset.data))
         for i, k in enumerate(dset.label_types):
             out_data[k + "_classes"] = dset.label_classes[i]
             out_data[k + "_labels"] = np.asarray(dset.labels[:, i])
-        # add code for adding boolean mask 
-        if args.mask:
-            correct_incorrect = predicted_labels == true_labels
-            out_data['Prediction_classes'] = ['Incorrect:0', 'Correct:1']
-            out_data['Prediction_labels'] = correct_incorrect.astype(int)    
-            out_data['Prediction_human_readable_labels'] = ['Correct' if label == 1 else 'Incorrect' for label in correct_incorrect]
-        # should look something like this:
-        # out_data['Prediction_classes'] = ['Correct', 'Incorrect']
-        # out_data['Prediction_labels'] = [0, 1, 1, 0, 1....]
 
     np.savez(args.output_npz, **out_data)
 
