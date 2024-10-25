@@ -157,7 +157,6 @@ def get_layers(layers_cmd):
 
 def _add_training_args(parser):
     parser.add_argument('labels', type=str, help="the label to train with")
-    parser.add_argument("--mode", type = str, help="Mode of prediction: classification/regression")
     parser.add_argument("--training", type=str, nargs='+', required=True, help="directories containing training data")
 
     grp = parser.add_mutually_exclusive_group()
