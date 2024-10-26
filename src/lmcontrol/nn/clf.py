@@ -57,7 +57,7 @@ class LightningResNet(L.LightningModule):
         if label_type not in self.loss_functions:
             raise ValueError(f"Unknown label type: {label_type}. Expected one of {list(self.loss_functions.keys())}")
         
-        self.backbone = ResNet(label_type=label_type, block=block, layers=layers, planes=planes, num_outputs=num_outputs, return_embeddings=return_embeddings)```
+        self.backbone = ResNet(label_type=label_type, block=block, layers=layers, planes=planes, num_outputs=num_outputs, return_embeddings=return_embeddings)
         if label_type == 'time':
             self.backbone = nn.Sequential(self.backbone, nn.Softplus(), nn.Flatten(start_dim=0))
         self.criterion = self.loss_functions[label_type]
