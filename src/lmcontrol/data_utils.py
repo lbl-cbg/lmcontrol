@@ -1,3 +1,5 @@
+
+
 import numpy as np
 from sklearn.preprocessing import LabelEncoder
 
@@ -6,58 +8,70 @@ from .utils import get_logger
 def write_npz(path, images, masks, paths, **metadata):
     np.savez(path, masks=masks, images=images, paths=paths, **metadata)
 
+# make label_type a string (Andrew)
 
-def load_npzs(npzs, logger):
+def load_npzs(npzs, logger, n_samples=None, label_type=None):
     """Load data from NPZ files generated from lmcontrol crop command"""
-    masks = list()
-    images = list()
-    paths = list()
-
+    masks = []
+    images = []
+    paths = []
     metadata = dict()
+
     for npz_path in npzs:
         logger.debug(f"Reading {npz_path}")
         npz = np.load(npz_path)
-        masks.append(npz['masks'])
-        images.append(npz['images'])
-        paths.append(npz['paths'])
+        
+        total_samples = len(npz['masks'])
+        
+        if n_samples is not None and total_samples > n_samples:
+            indices = np.random.permutation(total_samples)[:n_samples]
+        else:
+            indices = np.s_[:]
+        
+        masks.append(npz['masks'][indices])
+        images.append(npz['images'][indices])
+        paths.append(npz['paths'][indices])
 
-
-        # read metadata found in NPZ files
         md_keys = set(npz.keys()) - {'paths', 'masks', 'images'}
         logger.debug(f"Found the following keys in {npz_path}: {' '.join(sorted(md_keys))}")
-        for k in md_keys:
-            v = metadata.setdefault(k, list())
-            v.extend([str(npz[k])] * len(npz['masks']))
+        
+        for k in sorted(md_keys):
+            if npz[k].ndim == 0:
+                metadata.setdefault(k, []).extend([str(npz[k])] * len(indices))
+            else:
+                metadata.setdefault(k, []).extend(np.array(npz[k])[indices])
 
-
-    # merge all image arrays
     logger.debug("Merging masks")
-    masks = np.concatenate(masks)
+    masks = np.concatenate(masks, axis=0)
     logger.debug("Merging images")
-    images = np.concatenate(images)
+    images = np.concatenate(images, axis=0)
     logger.debug("Merging paths")
-    paths = np.concatenate(paths)
+    paths = np.concatenate(paths, axis=0)
+    
+    metadata = {k: np.array(v) for k, v in metadata.items()}
 
     target_len = len(masks)
-    error = False
-
-    # make sure all metadata keys were found in all NPZ files
     for k in metadata.keys():
-        metadata[k] = np.array(metadata[k])
         if len(metadata[k]) != target_len:
             logger.critical(f"Metadata '{k}' not found in all NPZ files")
-            error = True
-
-    if error:
-        raise ValueError("NPZ files do not have the same metadata keys. See CRITICAL messages in logs for more details")
-
+            raise ValueError(f"Metadata '{k}' length mismatch: expected {target_len}, got {len(metadata[k])}")
     return masks, images, paths, metadata
 
-def encode_labels(labels, return_classes=True):
+def encode_labels(labels, label_type, return_classes=True):
     """This is a wrapper for sklearn.preprocessing.LabelEncoder"""
     enc = LabelEncoder().fit(labels)
-    if return_classes:
-        return enc.transform(labels), enc.classes_
-    else:
-        return enc.transform(labels)
 
+    if isinstance(label_type, list):
+        label_type = label_type[0]
+    label_type = label_type.strip()
+
+    if label_type != 'time':
+        if return_classes:
+            return enc.transform(labels), enc.classes_
+        else:
+            return enc.transform(labels)
+    elif label_type == 'time':
+        labels = np.array(labels, dtype=np.float32)
+        return labels
+    else:
+        raise ValueError("Unrecognised label type")

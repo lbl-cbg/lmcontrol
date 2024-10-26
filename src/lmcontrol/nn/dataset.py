@@ -1,13 +1,19 @@
+
+# function 'norm ' has been modified. Please keep a check of it.
 import numpy as np
 from lightly.data import LightlyDataset
 import torch
 from torch.utils.data import Dataset
 import torchvision.transforms.v2 as T
+from sklearn.model_selection import train_test_split
 
 
 from ..data_utils import encode_labels, load_npzs
 from ..utils import get_logger
 
+import torch
+from torch.utils.data import Dataset
+import glob
 
 class GaussianNoise(T._transform.Transform):
     """Applies random Gaussian noise to a tensor.
@@ -53,14 +59,13 @@ class Norm(T._transform.Transform):
     def __call__(self, sample: torch.Tensor) -> torch.Tensor:
         ret = self.T(self.T(sample) - self.T(sample.mean(dim=(-2, -1))))
         if self.scale:
-            ret = self.T(self.T(ret) / self.T(torch.amax(torch.abs(ret), dim=(-2, -1))))
+            ret = self.T(self.T(ret) / self.T(torch.std(ret, dim=(-2, -1))))
         return ret
-
 
 
 class LMDataset(Dataset):
 
-    def __init__(self, npzs, use_masks=False, return_labels=False, logger=None):
+    def __init__(self, npzs, use_masks=False, return_labels=False, logger=None, transform=None, label_type=None, n_samples=None, return_embeddings=None, split=None, val_size=None, seed=None):
         """
         Args:
             npzs (array-like)       : A list or tuple of paths to NPZ files containing cropped images
@@ -70,28 +75,63 @@ class LMDataset(Dataset):
         elif len(npzs) == 0:
             raise ValueError("Got empty array-like for argument 'npzs'")
         logger = logger or get_logger('warning')
-        masks, images, paths, metadata = load_npzs(npzs, logger)
+
+        mode = 'regression' if label_type == 'time' else 'classification'
+
+        masks, images, paths, metadata = load_npzs(npzs, logger, n_samples, label_type)
         if use_masks:
             self.data = masks
         else:
             self.data = images
         self.data = torch.from_numpy(self.data)[:, None, :, :]
         self.paths = tuple(paths)
-        self.transform = None
+        self.transform = transform
+
+
+        if not isinstance(label_type, (tuple, list)):
+            label_type = [label_type]
 
         self.labels = None
         self.label_classes = None
-        self.label_types = None
+        self.label_type = None
         if return_labels:
             tmp = list()
+            self.label_type = list()
             self.label_classes = list()
-            self.label_types = list()
             for k in metadata:
-                self.label_types.append(k)
-                labels, classes = encode_labels(metadata[k])
-                self.label_classes.append(classes)
+                if not return_embeddings:           
+                    if k not in label_type:
+                        continue
+                self.label_type.append(k)
+                if mode == 'regression':
+                    labels = encode_labels(metadata[k], label_type)  
+                elif mode == 'classification':     
+                    labels, classes = encode_labels(metadata[k], label_type)
+                    self.label_classes.append(classes)
+                else:
+                    raise ValueError("task_type must be either 'classification' or 'regression'")
                 tmp.append(labels)
             self.labels = torch.from_numpy(np.stack(tmp, axis=1))
+        
+        if val_size:
+            self._split_data(split, val_size, seed)
+
+
+    def _split_data(self, split, val_size, seed):
+
+        num_samples = len(self.data)
+        indices = np.arange(num_samples)
+    
+        train_indices, val_indices = train_test_split(indices, test_size=val_size, random_state=seed, stratify=self.labels)
+
+        if split == 'train':
+            self.data = self.data[train_indices]
+            if self.labels is not None:
+                self.labels = self.labels[train_indices]
+        elif split == 'validate':
+            self.data = self.data[val_indices]
+            if self.labels is not None:
+                self.labels = self.labels[val_indices]
 
     def __getitem__(self, i):
         ret = self.data[i]
@@ -107,6 +147,12 @@ class LMDataset(Dataset):
     def index_to_filename(dataset, i):
         return dataset.paths[i]
 
+def extract_labels_from_filename(filename):
+    """Extract labels from filename in the format Sx_HTY_randomtext.npz"""
+    parts = filename.split('/')[-1].split('_')
+    x_label = parts[0][1:]  # Extract X from SX
+    y_label = parts[1][2:]  # Extract Y from HTY
+    return x_label, y_label
 
 TRANSFORMS = {
         'blur': T.GaussianBlur(3, sigma=(0.01, 1.0)),

@@ -23,6 +23,12 @@ def main():
         'Self-supervised Learning': {
             'train-byol': Command('nn.byol.train', 'Train BYOL model'),
             'infer-byol': Command('nn.byol.predict', 'Run with inference BYOL backbone'),
+            
+        },
+        'Supervised Learning':{
+            'tune': Command('nn.clf.tune', 'Run HPO for classifier or regressor with Optuna'),
+            'sup-train': Command('nn.clf.train', 'Train classifier or regressor to predict bioreactor properties from images'),
+            'sup-predict': Command('nn.clf.predict', 'Predict bioreactor properties from images using trained model')
         },
     }
     import sys
