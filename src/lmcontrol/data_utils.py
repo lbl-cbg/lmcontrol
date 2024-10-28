@@ -1,5 +1,4 @@
-
-
+import warnings
 import numpy as np
 from sklearn.preprocessing import LabelEncoder
 
@@ -22,24 +21,31 @@ def load_npzs(npzs, logger, n_samples=None, label_type=None):
         npz = np.load(npz_path)
         
         total_samples = len(npz['masks'])
-        
-        if n_samples is not None and total_samples > n_samples:
+        indices = None
+        if n_samples is not None and total_samples > n_samples:    # take a subset
             indices = np.random.permutation(total_samples)[:n_samples]
-        else:
-            indices = np.s_[:]
-        
-        masks.append(npz['masks'][indices])
-        images.append(npz['images'][indices])
-        paths.append(npz['paths'][indices])
+            masks.append(npz['masks'][indices])
+            images.append(npz['images'][indices])
+            paths.append(npz['paths'][indices])
+        else:                                                      # dont take a subset
+            if n_samples > total_samples:
+                warnings.warn(f"{n_samples} is more samples than found in {npz_path}. Will use all samples")
+            n_samples = total_samples
+            masks.append(npz['masks'])
+            images.append(npz['images'])
+            paths.append(npz['paths'])
 
         md_keys = set(npz.keys()) - {'paths', 'masks', 'images'}
         logger.debug(f"Found the following keys in {npz_path}: {' '.join(sorted(md_keys))}")
         
         for k in sorted(md_keys):
             if npz[k].ndim == 0:
-                metadata.setdefault(k, []).extend([str(npz[k])] * len(indices))
+                metadata.setdefault(k, []).extend([str(npz[k])] * n_samples)
             else:
-                metadata.setdefault(k, []).extend(np.array(npz[k])[indices])
+                if indices is not None:
+                    metadata.setdefault(k, []).extend(npz[k][indices])
+                else:
+                    metadata.setdefault(k, []).extend(npz[k])
 
     logger.debug("Merging masks")
     masks = np.concatenate(masks, axis=0)
