@@ -60,8 +60,6 @@ class LightningResNet(L.LightningModule):
         self.backbone = ResNet(label_type=label_type, block=block, layers=layers, planes=planes, num_outputs=num_outputs, return_embeddings=return_embeddings)
         if label_type == 'time':
             self.backbone = nn.Sequential(self.backbone, nn.Softplus(), nn.Flatten(start_dim=1))
-        # if label_type == 'time' and return_embeddings:
-        #     self.backbone = nn.Sequential(self.backbone, nn.Softplus(), nn.Flatten(start_dim=1))
         self.criterion = self.loss_functions[label_type]
         self.save_hyperparameters()
         self.label_type = label_type
