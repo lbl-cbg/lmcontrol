@@ -59,7 +59,7 @@ class LightningResNet(L.LightningModule):
         
         self.backbone = ResNet(label_type=label_type, block=block, layers=layers, planes=planes, num_outputs=num_outputs, return_embeddings=return_embeddings)
         if label_type == 'time':
-            self.backbone = nn.Sequential(self.backbone, nn.Softplus(), nn.Flatten(start_dim=0))
+            self.backbone = nn.Sequential(self.backbone, nn.Softplus(), nn.Flatten(start_dim=1))
         self.criterion = self.loss_functions[label_type]
         self.save_hyperparameters()
         self.label_type = label_type
@@ -391,13 +391,13 @@ def predict(argv=None):
     model = LightningResNet.load_from_checkpoint(args.checkpoint, return_embeddings=args.return_embeddings)
     accelerator = "gpu" if torch.cuda.is_available() else "cpu"
     trainer = L.Trainer(devices=1, accelerator=accelerator)
-
+    
     logger.info("Running predictions")
     predictions = trainer.predict(model, predict_loader)
     predictions = torch.cat(predictions).numpy()
 
     if args.return_embeddings:
-        logger.info("No classifier mode: Saving embeddings")
+        logger.info("Saving embeddings")
         out_data = dict(predictions=predictions)
         label_type = None
     else:
