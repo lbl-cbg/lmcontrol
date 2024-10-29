@@ -59,7 +59,7 @@ class LightningResNet(L.LightningModule):
         
         self.backbone = ResNet(label_type=label_type, block=block, layers=layers, planes=planes, num_outputs=num_outputs, return_embeddings=return_embeddings)
         if label_type == 'time':
-            self.backbone = nn.Sequential(self.backbone, nn.Softplus(), nn.Flatten(start_dim=1)) #change bac to 0 once done
+            self.backbone = nn.Sequential(self.backbone, nn.Softplus(), nn.Flatten(start_dim=1))
         # if label_type == 'time' and return_embeddings:
         #     self.backbone = nn.Sequential(self.backbone, nn.Softplus(), nn.Flatten(start_dim=1))
         self.criterion = self.loss_functions[label_type]
@@ -399,7 +399,7 @@ def predict(argv=None):
     predictions = torch.cat(predictions).numpy()
 
     if args.return_embeddings:
-        logger.info("No regression mode: Saving embeddings")
+        logger.info("Saving embeddings")
         out_data = dict(predictions=predictions)
         label_type = None
     else:
@@ -456,7 +456,6 @@ def predict(argv=None):
             out_data[k + "_labels"] = np.asarray(dset.labels[:, i])
 
     np.savez(args.output_npz, **out_data)
-    #np.savez(args.output_npz, **{key: np.array(val, dtype=object) for key, val in out_data.items()})
 
     logger.info(f"Results saved to {args.output_npz}")
 
