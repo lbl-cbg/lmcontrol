@@ -99,9 +99,9 @@ class LMDataset(Dataset):
             self.label_type = list()
             self.label_classes = list()
             for k in metadata:
-                if not return_embeddings:           
-                    if k not in label_type:
-                        continue
+                #if not return_embeddings:           
+                if k not in label_type:
+                    continue
                 self.label_type.append(k)
                 if mode == 'regression':
                     labels = encode_labels(metadata[k], label_type)  
