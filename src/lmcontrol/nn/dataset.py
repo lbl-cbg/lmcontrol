@@ -111,7 +111,8 @@ class LMDataset(Dataset):
                     raise ValueError("task_type must be either 'classification' or 'regression'")
                 tmp.append(labels)
             self.labels = torch.from_numpy(np.stack(tmp, axis=1))
-        
+            self.metadata = metadata
+            
         if val_size:
             self._split_data(split, val_size, seed)
 

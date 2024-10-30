@@ -450,6 +450,8 @@ def predict(argv=None):
     if not args.pred_only:
         dset = predict_dataset
         out_data['images'] = np.asarray(torch.squeeze(dset.data))
+        for key in dset.metadata:
+            out_data[key] = np.asarray(dset.metadata[key])
         for i, k in enumerate(dset.label_type):
             out_data[k + "_labels"] = np.asarray(dset.labels[:, i])
 
