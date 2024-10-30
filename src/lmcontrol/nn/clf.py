@@ -35,6 +35,9 @@ from ..data_utils import load_npzs, encode_labels
 from .dataset import LMDataset, get_transforms as _get_transforms
 from lmcontrol.nn.resnet import ResNet
 
+## add multilabels feature
+## create a custom loss function usitng torch module
+## create a weights dictionary and give 1000 for NMELoss
 
 class LightningResNet(L.LightningModule):
 
@@ -135,7 +138,7 @@ def get_layers(layers_cmd):
     return layers
 
 def _add_training_args(parser):
-    parser.add_argument('labels', type=str, choices=['time', 'feed', 'starting_media', 'condition', 'sample'], help="the label to train with")
+    parser.add_argument('labels', type=str, nargs='+', choices=['time', 'feed', 'starting_media', 'condition', 'sample'], help="the label to train with")
     parser.add_argument("--training", type=str, nargs='+', required=True, help="directories containing training data")
 
     grp = parser.add_mutually_exclusive_group()
