@@ -57,13 +57,26 @@ class LightningResNet(L.LightningModule):
             'feed': nn.CrossEntropyLoss(),  
             'starting media': nn.CrossEntropyLoss()  
         }
-        if label_type not in self.loss_functions:
-            raise ValueError(f"Unknown label type: {label_type}. Expected one of {list(self.loss_functions.keys())}")
+        self.loss_weights = {
+            'time': 1e3,
+            'sample': 1,
+            'condition': 1,
+            'feed': 1,
+            'starting media': 1
+        }
+        
+        if isinstance(label_type, str):
+            label_type = [label_type]
+
+        if label_type is not None:
+            self.loss_functions = {key: self.loss_functions[key] for key in label_type if key in self.loss_functions}
+            self.loss_weights = {key: self.loss_weights[key] for key in label_type if key in self.loss_weights}
         
         self.backbone = ResNet(label_type=label_type, block=block, layers=layers, planes=planes, num_outputs=num_outputs, return_embeddings=return_embeddings)
-        if label_type == 'time':
+        if 'time' in label_type:
             self.backbone = nn.Sequential(self.backbone, nn.Softplus(), nn.Flatten(start_dim=1))
-        self.criterion = self.loss_functions[label_type]
+
+        #self.criterion = self.loss_functions[label_type] 
         self.save_hyperparameters()
         self.label_type = label_type
         self.lr = lr
@@ -73,6 +86,11 @@ class LightningResNet(L.LightningModule):
         self.planes = planes
         self.layers = layers
         
+        if len(label_type) > 1:
+            self.criteria = {key: self.loss_functions[key] for key in label_type} 
+        else:
+            self.criterion = self.loss_functions[label_type[0]]  
+
     def forward(self, x):
         return self.backbone(x)
 
@@ -81,32 +99,46 @@ class LightningResNet(L.LightningModule):
         outputs = self.forward(images)
         loss = self.criterion(outputs, labels[:, 0]) 
 
-        if self.label_type != 'time':
-            preds = torch.argmax(outputs, dim=1)
-            acc = accuracy_score(labels[:, 0].cpu().numpy(), preds.cpu().numpy())
-            self.log('train_accuracy', acc, on_step=False, on_epoch=True, prog_bar=True)
-            self.log('train_loss', loss, on_epoch=True)
-        elif self.label_type == 'time':
-            self.log('train_loss', loss, on_epoch=True)
-        else:
-            raise ValueError("task_type must be either 'classification' or 'regression'")
-        return loss
+        outputs_dict = {}
+        for idx, key in enumerate(self.loss_weights.keys()):
+            outputs_dict[key] = outputs[:,idx]
+
+        total_loss = 0
+
+        for key in outputs_dict.keys():
+            loss = self.loss_functions[key](outputs_dict[key], labels[:, idx].float()) * self.loss_weights[key]
+            self.log(f'train_loss_{key}', loss, on_step=False, on_epoch=True)
+            total_loss += loss
+        
+            if key != 'time':
+                preds = torch.argmax(outputs_dict[key])
+                acc = accuracy_score(labels[:, idx].cpu().numpy(), preds.cpu().numpy())
+                self.log(f'train_accuracy_{key}', acc, on_step=False, on_epoch=True)
+
+        return total_loss
 
     def validation_step(self, batch, batch_idx):
         images, labels = batch
         outputs = self.forward(images)
-        loss = self.criterion(outputs, labels[:, 0]) 
 
-        if self.label_type != 'time':
-            preds = torch.argmax(outputs, dim=1)
-            acc = accuracy_score(labels[:, 0].cpu().numpy(), preds.cpu().numpy())
-            self.log('val_accuracy', acc, on_step=False, on_epoch=True, prog_bar=True)
-            self.log('val_loss', loss, on_epoch=True)
-        elif self.label_type == 'time':
-            self.log('val_loss', loss, on_epoch=True)
-        else:
-            raise ValueError("task_type must be either 'classification' or 'regression'")
-        return loss
+        outputs_dict = {}
+        for idx, key in enumerate(self.loss_weights.keys()):
+            outputs_dict[key] = outputs[:,idx]
+
+        total_loss = 0
+
+        for key in outputs_dict.keys(): 
+            loss = self.loss_functions[key](outputs_dict[key], labels[:, idx].float()) * self.loss_weights[key] 
+            self.log(f'val_loss_{key}', loss, on_step=False, on_epoch=True)
+            total_loss += loss
+
+            if key != 'time':
+                preds = torch.argmax(outputs_dict[key], dim=1)
+                breakpoint()
+                acc = accuracy_score(labels[:, idx].cpu().numpy(), preds.cpu().numpy())
+                self.log(f'val_accuracy_{key}', acc, on_step=False, on_epoch=True)
+
+        return total_loss
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
@@ -201,7 +233,6 @@ def _get_loaders_and_model(args,  logger=None):
         for i in range(train_dataset.labels.shape[1]):
                 logger.info(train_dataset.label_type[i] + " - " + str(torch.unique(train_dataset.labels[:, i])) + str(train_dataset.label_classes))
 
-
         logger.info(f"Loading validation data: {len(val_files)} files")
         val_dataset = LMDataset(val_files, transform=transform_val, logger=logger, return_labels=True, label_type=args.labels, n_samples=n, return_embeddings=args.return_embeddings)
         for i in range(val_dataset.labels.shape[1]):
@@ -216,12 +247,15 @@ def _get_loaders_and_model(args,  logger=None):
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, drop_last=True, num_workers=num_workers)
     val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, drop_last=True, num_workers=num_workers)
 
-    if args.labels != 'time':
-        num_outputs = len(train_dataset.label_classes[0])
-    elif args.labels == 'time':
-        num_outputs = 1
-    else:
-        raise ValueError("task_type must be either 'classification' or 'regression'")
+    num_outputs = 0
+    for i in range(train_dataset.labels.shape[1]):
+        label=train_dataset.label_type[i]
+        if label == 'time':
+            num_outputs += 1  
+        elif label in args.labels:  
+            num_outputs += len(train_dataset.label_classes[i]) 
+        else:
+            raise ValueError(f"Unknown label type: {label}. Available labels are: {args.labels}")
 
     model = LightningResNet(num_outputs=num_outputs,lr=args.lr, step_size=args.step_size, gamma=args.gamma, block=args.block, planes=args.planes, layers=args.layers, return_embeddings=args.return_embeddings, label_type=args.labels)
 
@@ -301,6 +335,7 @@ def train(argv=None):
     logger = get_logger('info')
 
     train_loader, val_loader, model = _get_loaders_and_model(args, logger=logger)
+    
     trainer = _get_trainer(args)
     trainer.fit(model, train_loader, val_loader)
 
@@ -309,7 +344,6 @@ def objective(args, trial):
     args.lr = trial.suggest_float("lr", 1e-5, 1e-2, log=True)
     args.step_size = trial.suggest_int('step_size', 5, 15, step=5)
     args.gamma = trial.suggest_float('gamma', 0.1, 0.5)
-
 
     block_type = trial.suggest_categorical('block_type', ['BasicBlock', 'Bottleneck'])
     args.block = get_block(block_type)
