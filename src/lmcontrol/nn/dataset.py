@@ -75,9 +75,7 @@ class LMDataset(Dataset):
         elif len(npzs) == 0:
             raise ValueError("Got empty array-like for argument 'npzs'")
         logger = logger or get_logger('warning')
-
-        mode = 'regression' if label_type == 'time' else 'classification'
-
+        
         masks, images, paths, metadata = load_npzs(npzs, logger, n_samples, label_type)
         if use_masks:
             self.data = masks
@@ -87,7 +85,6 @@ class LMDataset(Dataset):
         self.paths = tuple(paths)
         self.transform = transform
 
-
         if not isinstance(label_type, (tuple, list)):
             label_type = [label_type]
 
@@ -95,27 +92,24 @@ class LMDataset(Dataset):
         self.label_classes = None
         self.label_type = None
         if return_labels:
-            tmp = list()
-            self.label_type = list()
-            self.label_classes = list()
-            for k in metadata:
-                if k not in label_type:
-                    continue
+            tmp = []
+            self.label_type = []
+            self.label_classes = []
+            for k in label_type:
                 self.label_type.append(k)
-                if mode == 'regression':
-                    labels = encode_labels(metadata[k], label_type)  
-                elif mode == 'classification':     
-                    labels, classes = encode_labels(metadata[k], label_type)
-                    self.label_classes.append(classes)
+                
+                if k == 'time':
+                    labels = torch.from_numpy(encode_labels(metadata[k], 'regression'))
                 else:
-                    raise ValueError("task_type must be either 'classification' or 'regression'")
+                    labels = torch.from_numpy(encode_labels(metadata[k], 'classification'))
+                    
                 tmp.append(labels)
-            self.labels = torch.from_numpy(np.stack(tmp, axis=1))
+            
+            self.labels = tmp
             self.metadata = metadata
             
         if val_size:
             self._split_data(split, val_size, seed)
-
 
     def _split_data(self, split, val_size, seed):
 
@@ -137,8 +131,12 @@ class LMDataset(Dataset):
         ret = self.data[i]
         if self.transform is not None:
             ret = self.transform(ret)
-        labels = -1 if self.labels is None else self.labels[i]
-        return ret, labels
+        if self.labels is None:
+            return ret
+        else:
+            # length of self.labels is same as that of label_types
+            ret_tmp = [self.labels[j][i] for j in range(len(self.labels))]
+            return ret, tuple(ret_tmp)
 
     def __len__(self):
         return len(self.data)

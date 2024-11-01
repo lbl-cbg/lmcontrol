@@ -44,12 +44,13 @@ class LightningResNet(L.LightningModule):
     val_metric = "validation_ncs"
     train_metric = "train_ncs"
 
-    def __init__(self, num_outputs=1, lr=0.01, step_size=2, gamma=0.1, planes=[8, 16, 32, 64], layers=[1, 1, 1, 1], block=BasicBlock, return_embeddings=False, label_type='time'):
+    def __init__(self,label_index_dict={'feed', 'time'}, label_counts={'time':1, 'feed':3}, num_outputs=1, lr=0.01, step_size=2, gamma=0.1, planes=[8, 16, 32, 64], layers=[1, 1, 1, 1], block=BasicBlock, return_embeddings=False, label_type='time'):
         super().__init__()
 
         weights = None 
         progress = True
-
+        self.label_index_dict = label_index_dict
+        self.label_counts = label_counts
         self.loss_functions = {
             'time': nn.MSELoss(),
             'sample': nn.CrossEntropyLoss(),
@@ -58,7 +59,7 @@ class LightningResNet(L.LightningModule):
             'starting media': nn.CrossEntropyLoss()  
         }
         self.loss_weights = {
-            'time': 1e3,
+            'time': 1e-3,
             'sample': 1,
             'condition': 1,
             'feed': 1,
@@ -71,12 +72,11 @@ class LightningResNet(L.LightningModule):
         if label_type is not None:
             self.loss_functions = {key: self.loss_functions[key] for key in label_type if key in self.loss_functions}
             self.loss_weights = {key: self.loss_weights[key] for key in label_type if key in self.loss_weights}
-        
+
         self.backbone = ResNet(label_type=label_type, block=block, layers=layers, planes=planes, num_outputs=num_outputs, return_embeddings=return_embeddings)
         if 'time' in label_type:
             self.backbone = nn.Sequential(self.backbone, nn.Softplus(), nn.Flatten(start_dim=1))
 
-        #self.criterion = self.loss_functions[label_type] 
         self.save_hyperparameters()
         self.label_type = label_type
         self.lr = lr
@@ -97,47 +97,70 @@ class LightningResNet(L.LightningModule):
     def training_step(self, batch, batch_idx):
         images, labels = batch
         outputs = self.forward(images)
-        loss = self.criterion(outputs, labels[:, 0]) 
-
+        
         outputs_dict = {}
-        for idx, key in enumerate(self.loss_weights.keys()):
-            outputs_dict[key] = outputs[:,idx]
+        start_idx = 0
+        
+        for key, count in self.label_counts.items():
+            end_idx = start_idx + count
+            outputs_dict[key] = outputs[:, start_idx:end_idx]
+            start_idx = end_idx 
 
         total_loss = 0
-
-        for key in outputs_dict.keys():
-            loss = self.loss_functions[key](outputs_dict[key], labels[:, idx].float()) * self.loss_weights[key]
+        
+        for key, output in outputs_dict.items():
+            
+            label_tensor = labels[self.label_index_dict[key]]
+            #idx = list(self.label_counts.keys()).index(key)
+            if key == 'time':
+                label_tensor = label_tensor.unsqueeze(1) 
+            loss = self.loss_functions[key](output, label_tensor) * self.loss_weights[key]
+            if key == 'time':
+                label_tensor = label_tensor.squeeze(1)
             self.log(f'train_loss_{key}', loss, on_step=False, on_epoch=True)
             total_loss += loss
-        
+            
             if key != 'time':
-                preds = torch.argmax(outputs_dict[key])
-                acc = accuracy_score(labels[:, idx].cpu().numpy(), preds.cpu().numpy())
+                preds = torch.argmax(output, dim=1)
+                acc = accuracy_score(label_tensor.cpu().numpy(), preds.cpu().numpy())
                 self.log(f'train_accuracy_{key}', acc, on_step=False, on_epoch=True)
 
+        self.log('total_train_loss', total_loss, on_step=False, on_epoch=True)
         return total_loss
 
-    def validation_step(self, batch, batch_idx):
+    def validation_step(self, batch, batch_idx):  
         images, labels = batch
         outputs = self.forward(images)
-
+        
         outputs_dict = {}
-        for idx, key in enumerate(self.loss_weights.keys()):
-            outputs_dict[key] = outputs[:,idx]
+        start_idx = 0
+        
+        for key, count in self.label_counts.items():
+            end_idx = start_idx + count
+            outputs_dict[key] = outputs[:, start_idx:end_idx]
+            start_idx = end_idx 
 
         total_loss = 0
-
-        for key in outputs_dict.keys(): 
-            loss = self.loss_functions[key](outputs_dict[key], labels[:, idx].float()) * self.loss_weights[key] 
+        
+        for key, output in outputs_dict.items():
+            
+            label_tensor = labels[self.label_index_dict[key]]
+            #idx = list(self.label_counts.keys()).index(key)
+            
+            if key == 'time':
+                label_tensor = label_tensor.unsqueeze(1) 
+            loss = self.loss_functions[key](output, label_tensor) * self.loss_weights[key]
+            if key == 'time':
+                label_tensor = label_tensor.squeeze(1)
             self.log(f'val_loss_{key}', loss, on_step=False, on_epoch=True)
             total_loss += loss
-
+            
             if key != 'time':
-                preds = torch.argmax(outputs_dict[key], dim=1)
-                breakpoint()
-                acc = accuracy_score(labels[:, idx].cpu().numpy(), preds.cpu().numpy())
+                preds = torch.argmax(output, dim=1)
+                acc = accuracy_score(label_tensor.cpu().numpy(), preds.cpu().numpy())
                 self.log(f'val_accuracy_{key}', acc, on_step=False, on_epoch=True)
 
+        self.log('total_val_loss', total_loss, on_step=False, on_epoch=True)
         return total_loss
 
     def configure_optimizers(self):
@@ -229,14 +252,16 @@ def _get_loaders_and_model(args,  logger=None):
 
         logger.info(f"Loading training data: {len(train_files)} files")
         train_dataset = LMDataset(train_files, transform=transform_train, logger=logger, return_labels=True, label_type=args.labels, n_samples=n, return_embeddings=args.return_embeddings)
-
-        for i in range(train_dataset.labels.shape[1]):
-                logger.info(train_dataset.label_type[i] + " - " + str(torch.unique(train_dataset.labels[:, i])) + str(train_dataset.label_classes))
+        
+        for i in range(len(train_dataset.labels)):
+                current_labels = train_dataset.labels[i]
+                logger.info(train_dataset.label_type[i] + " - " + str(torch.unique(current_labels)))
 
         logger.info(f"Loading validation data: {len(val_files)} files")
         val_dataset = LMDataset(val_files, transform=transform_val, logger=logger, return_labels=True, label_type=args.labels, n_samples=n, return_embeddings=args.return_embeddings)
-        for i in range(val_dataset.labels.shape[1]):
-            logger.info(val_dataset.label_type[i] + " - " + str(torch.unique(val_dataset.labels[:, i])) + str(val_dataset.label_classes))
+        for i in range(len(val_dataset.labels)):
+            current_labels = train_dataset.labels[i]
+            logger.info(val_dataset.label_type[i] + " - " + str(torch.unique(current_labels)))
 
     else:
         print("You must specify --validation or --val_frac", file=sys.stderr)
@@ -247,75 +272,54 @@ def _get_loaders_and_model(args,  logger=None):
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, drop_last=True, num_workers=num_workers)
     val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, drop_last=True, num_workers=num_workers)
 
+    label_index_dict = {label: idx for idx, label in enumerate(train_dataset.label_type)}
+    for label_type, index in label_index_dict.items():
+        print(f"{label_type}: {index}")
+
     num_outputs = 0
-    for i in range(train_dataset.labels.shape[1]):
-        label=train_dataset.label_type[i]
+    
+    for label, idx in label_index_dict.items():
         if label == 'time':
             num_outputs += 1  
-        elif label in args.labels:  
-            num_outputs += len(train_dataset.label_classes[i]) 
         else:
-            raise ValueError(f"Unknown label type: {label}. Available labels are: {args.labels}")
+            current_labels = train_dataset.labels[idx]
+            num_outputs += len(torch.unique(current_labels))
 
-    model = LightningResNet(num_outputs=num_outputs,lr=args.lr, step_size=args.step_size, gamma=args.gamma, block=args.block, planes=args.planes, layers=args.layers, return_embeddings=args.return_embeddings, label_type=args.labels)
+    label_counts = {}
+    for label, idx in label_index_dict.items():
+        if label == 'time':
+            label_counts[label] = 1
+        else:
+            current_labels = train_dataset.labels[idx]
+            label_counts[label] = len(torch.unique(current_labels))
+
+    model = LightningResNet(label_index_dict=label_index_dict, label_counts=label_counts, num_outputs=num_outputs, lr=args.lr, step_size=args.step_size, gamma=args.gamma, block=args.block, planes=args.planes, layers=args.layers, return_embeddings=args.return_embeddings, label_type=args.labels)
 
     return train_loader, val_loader, model
 
 
-def _get_trainer(args, trial=None): 
+def _get_trainer(args, trial=None):
     accelerator = "gpu" if torch.cuda.is_available() else "cpu"
-
+    
     callbacks = []
 
     targs = dict(max_epochs=args.epochs, devices=1, accelerator=accelerator, check_val_every_n_epoch=4, callbacks=callbacks)
     
-    if args.labels != 'time':
-        if args.early_stopping:
-            early_stopping = EarlyStopping(
-            monitor="val_accuracy",
-            min_delta=0.0001,
-            patience=10,
-            verbose=False,
-            mode="max"
-            )
-            callbacks.append(early_stopping)
+    if args.checkpoint:
+        checkpoint_callback = ModelCheckpoint(
+            dirpath=args.checkpoint,  
+            filename="checkpoint-{epoch:02d}-{total_val_loss:.4f}",  
+            save_top_k=3, 
+            monitor="total_val_loss", 
+            mode="min"  
+        )
+        callbacks.append(checkpoint_callback)
 
-        if args.checkpoint:
-            checkpoint_callback = ModelCheckpoint(
-                dirpath=args.checkpoint,  
-                filename="checkpoint-{epoch:02d}-{val_accuracy:.4f}",  
-                save_top_k=3, 
-                monitor="val_accuracy", 
-                mode="max"  
-            )
-            callbacks.append(checkpoint_callback)
-    elif args.labels == 'time':
-        if args.early_stopping:
-            early_stopping = EarlyStopping(
-            monitor="val_loss",
-            min_delta=0.0001,
-            patience=10,
-            verbose=False,
-            mode="min"
-            )
-            callbacks.append(early_stopping)
-
-        if args.checkpoint:
-            checkpoint_callback = ModelCheckpoint(
-                dirpath=args.checkpoint,  
-                filename="checkpoint-{epoch:02d}-{val_loss:.4f}",  
-                save_top_k=3, 
-                monitor="val_loss", 
-                mode="min"  
-            )
-            callbacks.append(checkpoint_callback)
-    else:
-        raise ValueError("task_type must be either 'classification' or 'regression'")
         
     if trial is not None :   # if 'trial' is passed in, assume we are using Optuna to do HPO        
         targs['logger'] = CSVLogger(args.outdir, name=args.experiment)
         if args.pruning:
-            callbacks.append(PyTorchLightningPruningCallback(trial, monitor="val_accuracy"))
+            callbacks.append(PyTorchLightningPruningCallback(trial, monitor="val_accuracy")) ## edit this for multilabels
     else:
         if args.stop_wandb:
             wandb.init(project="SX_HTY_Run1")
@@ -441,7 +445,7 @@ def predict(argv=None):
         logger.info("Classifier mode: Saving predictions using classification / regression")
 
         if true_labels is not None:
-            if args.labels != 'time':
+            if args.labels != 'time':                                               # change this for multilabel stuff
                     logger.info("mode:classification")
                     pred_labels = np.argmax(predictions, axis=1)
 

@@ -72,14 +72,8 @@ class ResNet(nn.Module):
         idx = max(i for i in range(len(layers)) if layers[i] != 0)
         n_features = planes[idx] * expansion[idx]
 
-        # add loop using self
-        if label_type != 'time':
-            self.fc = nn.Linear(n_features, num_outputs)
-        elif label_type == 'time':
-            self.fc = nn.Linear(n_features, 1)
-        else:
-            raise ValueError("mode must be either 'classification' or 'regression'")
-        
+        self.fc = nn.Linear(n_features, num_outputs)
+
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
