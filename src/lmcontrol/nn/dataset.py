@@ -65,7 +65,7 @@ class Norm(T._transform.Transform):
 
 class LMDataset(Dataset):
 
-    def __init__(self, npzs, use_masks=False, return_labels=False, logger=None, transform=None, label_type=None, n_samples=None, return_embeddings=None, split=None, val_size=None, seed=None):
+    def __init__(self, npzs, label_classes=None, use_masks=False, return_labels=False, logger=None, transform=None, label_type=None, n_samples=None, return_embeddings=None, split=None, val_size=None, seed=None):
         """
         Args:
             npzs (array-like)       : A list or tuple of paths to NPZ files containing cropped images
@@ -89,19 +89,24 @@ class LMDataset(Dataset):
             label_type = [label_type]
 
         self.labels = None
-        self.label_classes = None
+        self.label_classes = label_classes
         self.label_type = None
+
         if return_labels:
             tmp = []
             self.label_type = []
-            self.label_classes = []
+            self.label_classes = {}
             for k in label_type:
                 self.label_type.append(k)
                 
                 if k == 'time':
                     labels = torch.from_numpy(encode_labels(metadata[k], 'regression'))
+                    self.label_classes[k] = None
                 else:
-                    labels = torch.from_numpy(encode_labels(metadata[k], 'classification'))
+                    
+                    labels, classes = torch.from_numpy(encode_labels(metadata[k], 'classification', 
+                                                                     classes=self.label_classes.get(k), return_classes=True))
+                    self.label_classes[k] = classes
                     
                 tmp.append(labels)
             
@@ -115,7 +120,7 @@ class LMDataset(Dataset):
 
         num_samples = len(self.data)
         indices = np.arange(num_samples)
-    
+        breakpoint()
         train_indices, val_indices = train_test_split(indices, test_size=val_size, random_state=seed, stratify=self.labels)
 
         if split == 'train':

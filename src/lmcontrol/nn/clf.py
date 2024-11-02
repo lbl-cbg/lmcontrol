@@ -44,11 +44,12 @@ class LightningResNet(L.LightningModule):
     val_metric = "validation_ncs"
     train_metric = "train_ncs"
 
-    def __init__(self,label_index_dict={'feed', 'time'}, label_counts={'time':1, 'feed':3}, num_outputs=1, lr=0.01, step_size=2, gamma=0.1, planes=[8, 16, 32, 64], layers=[1, 1, 1, 1], block=BasicBlock, return_embeddings=False, label_type='time'):
+    def __init__(self, label_classes, label_index_dict={'feed', 'time'}, label_counts={'time':1, 'feed':3}, num_outputs=1, lr=0.01, step_size=2, gamma=0.1, planes=[8, 16, 32, 64], layers=[1, 1, 1, 1], block=BasicBlock, return_embeddings=False, label_type='time'):
         super().__init__()
 
         weights = None 
         progress = True
+        self.label_classes = label_classes
         self.label_index_dict = label_index_dict
         self.label_counts = label_counts
         self.loss_functions = {
@@ -56,14 +57,14 @@ class LightningResNet(L.LightningModule):
             'sample': nn.CrossEntropyLoss(),
             'condition': nn.CrossEntropyLoss(),
             'feed': nn.CrossEntropyLoss(),  
-            'starting media': nn.CrossEntropyLoss()  
+            'starting_media': nn.CrossEntropyLoss()  
         }
         self.loss_weights = {
-            'time': 1e-3,
+            'time': 1e-4,
             'sample': 1,
             'condition': 1,
             'feed': 1,
-            'starting media': 1
+            'starting_media': 1
         }
         
         if isinstance(label_type, str):
@@ -111,7 +112,6 @@ class LightningResNet(L.LightningModule):
         for key, output in outputs_dict.items():
             
             label_tensor = labels[self.label_index_dict[key]]
-            #idx = list(self.label_counts.keys()).index(key)
             if key == 'time':
                 label_tensor = label_tensor.unsqueeze(1) 
             loss = self.loss_functions[key](output, label_tensor) * self.loss_weights[key]
@@ -145,7 +145,6 @@ class LightningResNet(L.LightningModule):
         for key, output in outputs_dict.items():
             
             label_tensor = labels[self.label_index_dict[key]]
-            #idx = list(self.label_counts.keys()).index(key)
             
             if key == 'time':
                 label_tensor = label_tensor.unsqueeze(1) 
@@ -232,14 +231,16 @@ def _get_loaders_and_model(args,  logger=None):
         logger.info(f"Loading training data from: {len(split_files)} files")
         train_dataset = LMDataset(split_files, transform=transform_train, logger=logger, return_labels=True, label_type=args.labels, n_samples=n, return_embeddings=args.return_embeddings, split='train', val_size=args.val_frac, seed=args.seed)
 
-        for i in range(train_dataset.labels.shape[1]):
-                logger.info(train_dataset.label_type[i] + " - " + str(torch.unique(train_dataset.labels[:, i])) + str(train_dataset.label_classes))
+        for i in range(len(train_dataset.labels)):
+                current_labels = train_dataset.labels[i]
+                logger.info(train_dataset.label_type[i] + " - " + str(torch.unique(current_labels)))
 
 
         logger.info(f"Loading validation data from: {len(split_files)} files")
-        val_dataset = LMDataset(split_files, transform=transform_val, logger=logger, return_labels=True, label_type=args.labels, n_samples=n, return_embeddings=args.return_embeddings, split='validate', val_size=args.val_frac, seed=args.seed)
-        for i in range(val_dataset.labels.shape[1]):
-            logger.info(val_dataset.label_type[i] + " - " + str(torch.unique(val_dataset.labels[:, i])) + str(val_dataset.label_classes))
+        val_dataset = LMDataset(split_files, label_classes=train_dataset.label_classes, transform=transform_val, logger=logger, return_labels=True, label_type=args.labels, n_samples=n, return_embeddings=args.return_embeddings, split='validate', val_size=args.val_frac, seed=args.seed)
+        for i in range(len(val_dataset.labels)):
+            current_labels = train_dataset.labels[i]
+            logger.info(val_dataset.label_type[i] + " - " + str(torch.unique(current_labels)))
 
     elif args.validation:
         train_files = args.training
@@ -258,7 +259,7 @@ def _get_loaders_and_model(args,  logger=None):
                 logger.info(train_dataset.label_type[i] + " - " + str(torch.unique(current_labels)))
 
         logger.info(f"Loading validation data: {len(val_files)} files")
-        val_dataset = LMDataset(val_files, transform=transform_val, logger=logger, return_labels=True, label_type=args.labels, n_samples=n, return_embeddings=args.return_embeddings)
+        val_dataset = LMDataset(val_files, label_classes=train_dataset.label_classes, transform=transform_val, logger=logger, return_labels=True, label_type=args.labels, n_samples=n, return_embeddings=args.return_embeddings)
         for i in range(len(val_dataset.labels)):
             current_labels = train_dataset.labels[i]
             logger.info(val_dataset.label_type[i] + " - " + str(torch.unique(current_labels)))
@@ -293,7 +294,7 @@ def _get_loaders_and_model(args,  logger=None):
             current_labels = train_dataset.labels[idx]
             label_counts[label] = len(torch.unique(current_labels))
 
-    model = LightningResNet(label_index_dict=label_index_dict, label_counts=label_counts, num_outputs=num_outputs, lr=args.lr, step_size=args.step_size, gamma=args.gamma, block=args.block, planes=args.planes, layers=args.layers, return_embeddings=args.return_embeddings, label_type=args.labels)
+    model = LightningResNet(label_classes=train_dataset.label_classes, label_index_dict=label_index_dict, label_counts=label_counts, num_outputs=num_outputs, lr=args.lr, step_size=args.step_size, gamma=args.gamma, block=args.block, planes=args.planes, layers=args.layers, return_embeddings=args.return_embeddings, label_type=args.labels)
 
     return train_loader, val_loader, model
 
@@ -402,7 +403,7 @@ def tune(argv=None):
 
 def predict(argv=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument('labels', type=str, help="the label to predict with")  
+    parser.add_argument('labels', type=str, nargs='+', choices=['time', 'feed', 'starting_media', 'condition', 'sample'], help="the label to predict with")  
     parser.add_argument("--prediction", type=str, nargs='+', required=True, help="directories containing prediction data")
     parser.add_argument("-c", "--checkpoint", type=str, help="path to the model checkpoint file to use for inference")
     parser.add_argument("-o", "--output_npz", type=str, help="the path to save the embeddings to. Saved in NPZ format")
@@ -420,22 +421,52 @@ def predict(argv=None):
     predict_files = args.prediction
     n = args.n_samples
 
-    logger.info(f"Loading prediction data: {len(predict_files)} files")
-    predict_dataset = LMDataset(predict_files, transform=transform, logger=logger, return_labels=True, label_type=args.labels, n_samples=n, return_embeddings=args.return_embeddings)
-    for i in range(predict_dataset.labels.shape[1]):
-        logger.info(predict_dataset.label_type[i] + " - " + str(torch.unique(predict_dataset.labels[:, i])) + str(predict_dataset.label_classes))
+    model = LightningResNet.load_from_checkpoint(args.checkpoint, return_embeddings=args.return_embeddings)
 
-    true_labels = predict_dataset.labels[:, 0]
+    logger.info(f"Loading prediction data: {len(predict_files)} files")
+    predict_dataset = LMDataset(predict_files, encode_classes=model.encode_classes, transform=transform, logger=logger, return_labels=True, label_type=args.labels, n_samples=n, return_embeddings=args.return_embeddings)
+
+    for i in range(len(predict_dataset.labels)):
+        current_labels = predict_dataset.labels[i]
+        logger.info(predict_dataset.label_type[i] + " - " + str(torch.unique(current_labels)))
+
+    label_index_dict = {label: idx for idx, label in enumerate(predict_dataset.label_type)}
+    for label_type, index in label_index_dict.items():
+        print(f"{label_type}: {index}")
+    
+    num_outputs = 0
+    
+    for label, idx in label_index_dict.items():
+        if label == 'time':
+            num_outputs += 1  
+        else:
+            current_labels = predict_dataset.labels[idx]
+            num_outputs += len(torch.unique(current_labels))
+
+    label_counts = {}
+    for label, idx in label_index_dict.items():
+        if label == 'time':
+            label_counts[label] = 1
+        else:
+            current_labels = predict_dataset.labels[idx]
+            label_counts[label] = len(torch.unique(current_labels))
+
+    true_labels = []
+    for key in label_index_dict:
+        index = label_index_dict[key] 
+        true_labels.append(predict_dataset.labels[index])
+  
 
     predict_loader = DataLoader(predict_dataset, batch_size=32, shuffle=False, drop_last=False, num_workers=3)
 
-    model = LightningResNet.load_from_checkpoint(args.checkpoint, return_embeddings=args.return_embeddings)
     accelerator = "gpu" if torch.cuda.is_available() else "cpu"
     trainer = L.Trainer(devices=1, accelerator=accelerator)
     
     logger.info("Running predictions")
     predictions = trainer.predict(model, predict_loader)
+    
     predictions = torch.cat(predictions).numpy()
+    out_data = dict(predictions=predictions, true_labels=true_labels)
 
     if args.return_embeddings:
         logger.info("Saving embeddings")
@@ -445,56 +476,66 @@ def predict(argv=None):
         logger.info("Classifier mode: Saving predictions using classification / regression")
 
         if true_labels is not None:
-            if args.labels != 'time':                                               # change this for multilabel stuff
-                    logger.info("mode:classification")
-                    pred_labels = np.argmax(predictions, axis=1)
+            out_data = {'predictions': predictions, 'true_labels': true_labels}  
+            for key in label_index_dict:
+                index = label_index_dict[key]
+                
+                if key == 'time':
+                    time_predictions = predictions[:, index]  
+                    true_time_labels = true_labels[index]     
 
-                    accuracy = accuracy_score(true_labels, pred_labels)
-                    precision = precision_score(true_labels, pred_labels, average='weighted')
-                    recall = recall_score(true_labels, pred_labels, average='weighted')
-                    conf_matrix = confusion_matrix(true_labels, pred_labels)
+                    mse = mean_squared_error(true_time_labels, time_predictions)
+                    mae = mean_absolute_error(true_time_labels, time_predictions)
+                    r2 = r2_score(true_time_labels, time_predictions)
 
-                    logger.info(f"Accuracy: {accuracy:.4f}")
-                    logger.info(f"Precision: {precision:.4f}")
-                    logger.info(f"Recall: {recall:.4f}")
-                    logger.info(f"Confusion Matrix:\n{conf_matrix}")
-
-                    out_data = dict(predictions=predictions, true_labels=true_labels, pred_labels=pred_labels)
-                    correct_incorrect = np.where(pred_labels == true_labels, 1, 0)
-                    out_data['correct_incorrect'] = correct_incorrect
-
-            elif args.labels == 'time': 
-                    logger.info("mode:regression")
-                    pred_labels = np.argmax(predictions, axis=0)
-                    pred_values = predictions.flatten()
-
-                    mse = mean_squared_error(true_labels, pred_values)
-                    mae = mean_absolute_error(true_labels, pred_values)
-                    r2 = r2_score(true_labels, pred_values)
-
+                    logger.info(f"Mode: Regression for {key}")
                     logger.info(f"Mean Squared Error: {mse:.4f}")
                     logger.info(f"Mean Absolute Error: {mae:.4f}")
                     logger.info(f"R² Score: {r2:.4f}")
 
                     if args.save_residuals:
                         logger.info("Calculating and saving residuals")
-                        residuals = true_labels - pred_values
-                        out_data = dict(predictions=predictions, true_values=true_labels, pred_values=pred_values, residuals=residuals)
-                    else:
-                        out_data = dict(predictions=predictions, true_labels=true_labels, pred_labels=pred_values)
-            else:
-                raise ValueError("task_type must be either 'classification' or 'regression'")
+                        residuals = true_time_labels - time_predictions
+                        out_data['residuals'] = residuals
+
+                    out_data['true_labels_time'] = true_time_labels
+                    out_data['pred_labels_time'] = time_predictions
+
+                else:
+                    logger.info(f"Mode: Classification for {key}")
+
+                    num_classes = label_counts[key]
+
+                    label_predictions = predictions[:, index:index + num_classes]  
+                    pred_labels = np.argmax(label_predictions, axis=1)
+
+                    accuracy = accuracy_score(true_labels[index], pred_labels)  
+                    precision = precision_score(true_labels[index], pred_labels, average='weighted')
+                    recall = recall_score(true_labels[index], pred_labels, average='weighted')
+                    conf_matrix = confusion_matrix(true_labels[index], pred_labels)
+
+                    logger.info(f"Accuracy: {accuracy:.4f}")
+                    logger.info(f"Precision: {precision:.4f}")
+                    logger.info(f"Recall: {recall:.4f}")
+                    logger.info(f"Confusion Matrix:\n{conf_matrix}")
+
+                    correct_incorrect = np.where(pred_labels == true_labels[index], 1, 0)
+                    out_data['correct_incorrect'] = correct_incorrect
+
+                    out_data[f'true_labels_{key}'] = true_labels[index]
+                    out_data[f'pred_labels_{key}'] = pred_labels
+                    out_data[f'label_predictions_{key}'] = label_predictions  
 
         else:
-            out_data = dict(predictions=predictions, pred_labels=pred_values)
+            out_data = dict(predictions=predictions)
 
     if not args.pred_only:
         dset = predict_dataset
         out_data['images'] = np.asarray(torch.squeeze(dset.data))
         for key in dset.metadata:
             out_data[key] = np.asarray(dset.metadata[key])
-        for i, k in enumerate(dset.label_type):
-            out_data[k + "_labels"] = np.asarray(dset.labels[:, i])
+        # for i, k in enumerate(dset.label_type):                   # no need for this as we are anyways obtaining the key wise labels 
+        #     out_data[k + "_labels"] = np.asarray(dset.labels[i])
 
     np.savez(args.output_npz, **out_data)
 
