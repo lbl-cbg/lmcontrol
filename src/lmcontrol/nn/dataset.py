@@ -117,20 +117,22 @@ class LMDataset(Dataset):
             self._split_data(split, val_size, seed)
 
     def _split_data(self, split, val_size, seed):
-
         num_samples = len(self.data)
         indices = np.arange(num_samples)
         
-        train_indices, val_indices = train_test_split(indices, test_size=val_size, random_state=seed, stratify=self.labels)
+        stratify_label = np.stack([label.numpy() for label in self.labels], axis=1)
+        composite_label = [tuple(row) for row in stratify_label]
 
+        train_indices, val_indices = train_test_split(
+            indices, test_size=val_size, random_state=seed, stratify=composite_label
+        )
+        
         if split == 'train':
             self.data = self.data[train_indices]
-            if self.labels is not None:
-                self.labels = self.labels[train_indices]
+            self.labels = [label[train_indices] for label in self.labels] 
         elif split == 'validate':
             self.data = self.data[val_indices]
-            if self.labels is not None:
-                self.labels = self.labels[val_indices]
+            self.labels = [label[val_indices] for label in self.labels]  
 
     def __getitem__(self, i):
         ret = self.data[i]
