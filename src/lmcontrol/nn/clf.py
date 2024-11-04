@@ -421,11 +421,12 @@ def predict(argv=None):
     predict_files = args.prediction
     n = args.n_samples
 
-    model = LightningResNet.load_from_checkpoint(args.checkpoint, return_embeddings=args.return_embeddings)
 
     logger.info(f"Loading prediction data: {len(predict_files)} files")
-    predict_dataset = LMDataset(predict_files, encode_classes=model.encode_classes, transform=transform, logger=logger, return_labels=True, label_type=args.labels, n_samples=n, return_embeddings=args.return_embeddings)
+    predict_dataset = LMDataset(predict_files, transform=transform, logger=logger, return_labels=True, label_type=args.labels, n_samples=n, return_embeddings=args.return_embeddings)
 
+    model = LightningResNet.load_from_checkpoint(args.checkpoint, label_classes=predict_dataset.label_classes, return_embeddings=args.return_embeddings)
+    
     for i in range(len(predict_dataset.labels)):
         current_labels = predict_dataset.labels[i]
         logger.info(predict_dataset.label_type[i] + " - " + str(torch.unique(current_labels)))
@@ -465,8 +466,10 @@ def predict(argv=None):
     logger.info("Running predictions")
     predictions = trainer.predict(model, predict_loader)
     
+    label_classes = model.label_classes
     predictions = torch.cat(predictions).numpy()
-    out_data = dict(predictions=predictions, true_labels=true_labels)
+    
+    out_data = dict(predictions=predictions, true_labels=true_labels, label_classes = label_classes)
 
     if args.return_embeddings:
         logger.info("Saving embeddings")
@@ -476,7 +479,7 @@ def predict(argv=None):
         logger.info("Classifier mode: Saving predictions using classification / regression")
 
         if true_labels is not None:
-            out_data = {'predictions': predictions, 'true_labels': true_labels}  
+            out_data = {'predictions': predictions, 'true_labels': true_labels, 'label_classes': label_classes}   
             for key in label_index_dict:
                 index = label_index_dict[key]
                 

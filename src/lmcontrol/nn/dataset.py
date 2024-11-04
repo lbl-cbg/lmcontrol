@@ -104,8 +104,8 @@ class LMDataset(Dataset):
                     self.label_classes[k] = None
                 else:
                     
-                    labels, classes = torch.from_numpy(encode_labels(metadata[k], 'classification', 
-                                                                     classes=self.label_classes.get(k), return_classes=True))
+                    labels_np, classes = encode_labels(metadata[k], 'classification', classes=self.label_classes.get(k), return_classes=True)
+                    labels = torch.from_numpy(labels_np)
                     self.label_classes[k] = classes
                     
                 tmp.append(labels)
@@ -120,7 +120,7 @@ class LMDataset(Dataset):
 
         num_samples = len(self.data)
         indices = np.arange(num_samples)
-        breakpoint()
+        
         train_indices, val_indices = train_test_split(indices, test_size=val_size, random_state=seed, stratify=self.labels)
 
         if split == 'train':
