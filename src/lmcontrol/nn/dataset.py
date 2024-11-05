@@ -75,7 +75,7 @@ class LMDataset(Dataset):
         elif len(npzs) == 0:
             raise ValueError("Got empty array-like for argument 'npzs'")
         logger = logger or get_logger('warning')
-        
+
         masks, images, paths, metadata = load_npzs(npzs, logger, n_samples, label_type)
         if use_masks:
             self.data = masks
@@ -98,41 +98,41 @@ class LMDataset(Dataset):
             self.label_classes = {}
             for k in label_type:
                 self.label_type.append(k)
-                
+
                 if k == 'time':
                     labels = torch.from_numpy(encode_labels(metadata[k], 'regression'))
                     self.label_classes[k] = None
                 else:
-                    
+
                     labels_np, classes = encode_labels(metadata[k], 'classification', classes=self.label_classes.get(k), return_classes=True)
                     labels = torch.from_numpy(labels_np)
                     self.label_classes[k] = classes
-                    
+
                 tmp.append(labels)
-            
+
             self.labels = tmp
             self.metadata = metadata
-            
+
         if val_size:
             self._split_data(split, val_size, seed)
 
     def _split_data(self, split, val_size, seed):
         num_samples = len(self.data)
         indices = np.arange(num_samples)
-        
+
         stratify_label = np.stack([label.numpy() for label in self.labels], axis=1)
         composite_label = [tuple(row) for row in stratify_label]
 
         train_indices, val_indices = train_test_split(
             indices, test_size=val_size, random_state=seed, stratify=composite_label
         )
-        
+
         if split == 'train':
             self.data = self.data[train_indices]
-            self.labels = [label[train_indices] for label in self.labels] 
+            self.labels = [label[train_indices] for label in self.labels]
         elif split == 'validate':
             self.data = self.data[val_indices]
-            self.labels = [label[val_indices] for label in self.labels]  
+            self.labels = [label[val_indices] for label in self.labels]
 
     def __getitem__(self, i):
         ret = self.data[i]
