@@ -53,6 +53,7 @@ class MultiLabelLoss(nn.Module):
 class CrossEntropy(nn.Module):
 
     def __init__(self):
+        super().__init__()
         self.nlll = nn.NLLLoss()
 
     def forward(self, input, target):
@@ -86,10 +87,10 @@ class LightningResNet(L.LightningModule):
 
         self.label_classes = label_classes       # carry over labels into prediction
 
-        self.activations = [nn.Sequential(nn.Softplus(), nn.Flatten(start_dim=1)) if l == 'time' else nn.Softmax()
+        self.activations = [nn.Sequential(nn.Softplus(), nn.Flatten(start_dim=0)) if l == 'time' else nn.Softmax(dim=1)
                             for l in self.label_classes]
 
-        self.label_counts = [1 if x is None else len(x) for x in self.label_classes]
+        self.label_counts = [1 if x is None else len(x) for x in self.label_classes.values()]
 
         self.num_outputs = sum(self.label_counts)
 
@@ -109,7 +110,7 @@ class LightningResNet(L.LightningModule):
         self.save_hyperparameters()
 
     def forward(self, x):
-        output = self.backbone(x)
+        outputs = self.backbone(x)
         ret = list()
         start_idx = 0
         for act, count in zip(self.activations, self.label_counts):
@@ -127,7 +128,7 @@ class LightningResNet(L.LightningModule):
             else:
                 self.log(f"{step_type}_{_label_type}_loss", _loss, on_step=False, on_epoch=True)
                 preds = torch.argmax(_output, dim=1)
-                acc = accuracy_score(true_labels.cpu().numpy(), preds.cpu().numpy())
+                acc = accuracy_score(_label.cpu().numpy(), preds.cpu().numpy())
                 self.log(f"{step_type}_{_label_type}_accuracy", _loss, on_step=False, on_epoch=True)
 
     def training_step(self, batch, batch_idx):
@@ -262,9 +263,9 @@ def _get_loaders_and_model(args,  logger=None):
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, drop_last=True, num_workers=num_workers)
     val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, drop_last=True, num_workers=num_workers)
 
-    label_index_dict = {label: idx for idx, label in enumerate(train_dataset.label_type)}
-    for label_type, index in label_index_dict.items():
-        print(f"{label_type}: {index}")
+    # label_index_dict = {label: idx for idx, label in enumerate(train_dataset.label_type)}
+    # for label_type, index in label_index_dict.items():
+    #     print(f"{label_type}: {index}")
 
 
     model = LightningResNet(train_dataset.label_classes, lr=args.lr, step_size=args.step_size, gamma=args.gamma,
@@ -398,7 +399,7 @@ def predict(argv=None):
 
     logger.info(f"Loading prediction data: {len(predict_files)} files")
     predict_dataset = LMDataset(predict_files, transform=transform, logger=logger, return_labels=True, label_type=args.labels, n_samples=n, return_embeddings=args.return_embeddings)
-
+    
     model = LightningResNet.load_from_checkpoint(args.checkpoint, label_classes=predict_dataset.label_classes, return_embeddings=args.return_embeddings)
 
     for i in range(len(predict_dataset.labels)):
@@ -414,12 +415,12 @@ def predict(argv=None):
 
     logger.info("Running predictions")
     predictions = trainer.predict(model, predict_loader)
-
+    breakpoint()
     label_classes = model.label_classes
     predictions = torch.cat(predictions).numpy()
 
-    out_data = dict(predictions=predictions, true_labels=true_labels, label_classes=label_classes)
-
+    #out_data = dict(predictions=predictions, true_labels=true_labels, label_classes=label_classes)
+    true_labels = []
     if args.return_embeddings:
         logger.info("Saving embeddings")
         out_data = dict(predictions=predictions)
@@ -430,29 +431,29 @@ def predict(argv=None):
         if true_labels is not None:
             out_data = {'predictions': predictions, 'true_labels': true_labels, 'label_classes': label_classes}
             for index, key in enumerate(label_classes):
-            for key in label_index_dict:
-                index = label_index_dict[key]
+                for key in label_index_dict:
+                    index = label_index_dict[key]
 
-                if key == 'time':
-                    time_predictions = predictions[:, index]
-                    true_time_labels = true_labels[index]
+                    if key == 'time':
+                        time_predictions = predictions[:, index]
+                        true_time_labels = true_labels[index]
 
-                    mse = mean_squared_error(true_time_labels, time_predictions)
-                    mae = mean_absolute_error(true_time_labels, time_predictions)
-                    r2 = r2_score(true_time_labels, time_predictions)
+                        mse = mean_squared_error(true_time_labels, time_predictions)
+                        mae = mean_absolute_error(true_time_labels, time_predictions)
+                        r2 = r2_score(true_time_labels, time_predictions)
 
-                    logger.info(f"Mode: Regression for {key}")
-                    logger.info(f"Mean Squared Error: {mse:.4f}")
-                    logger.info(f"Mean Absolute Error: {mae:.4f}")
-                    logger.info(f"R² Score: {r2:.4f}")
+                        logger.info(f"Mode: Regression for {key}")
+                        logger.info(f"Mean Squared Error: {mse:.4f}")
+                        logger.info(f"Mean Absolute Error: {mae:.4f}")
+                        logger.info(f"R² Score: {r2:.4f}")
 
-                    if args.save_residuals:
-                        logger.info("Calculating and saving residuals")
-                        residuals = true_time_labels - time_predictions
-                        out_data['residuals'] = residuals
+                        if args.save_residuals:
+                            logger.info("Calculating and saving residuals")
+                            residuals = true_time_labels - time_predictions
+                            out_data['residuals'] = residuals
 
-                    out_data['true_labels_time'] = true_time_labels
-                    out_data['pred_labels_time'] = time_predictions
+                        out_data['true_labels_time'] = true_time_labels
+                        out_data['pred_labels_time'] = time_predictions
 
                 else:
                     logger.info(f"Mode: Classification for {key}")
