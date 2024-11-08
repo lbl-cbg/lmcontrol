@@ -125,6 +125,8 @@ class LightningResNet(L.LightningModule):
             _classes = self.label_classes[_label_type]
             if _classes is None:
                 self.log(f"{step_type}_{_label_type}_loss", _loss, on_step=False, on_epoch=True)
+                r2 = r2_score(_label.cpu().detach().numpy(), _output.cpu().detach().numpy())
+                self.log(f"{step_type}_{_label_type}_r2_score", r2, on_step=False, on_epoch=True)
             else:
                 self.log(f"{step_type}_{_label_type}_loss", _loss, on_step=False, on_epoch=True)
                 preds = torch.argmax(_output, dim=1)
