@@ -87,7 +87,7 @@ class LightningResNet(L.LightningModule):
 
         self.label_classes = label_classes       # carry over labels into prediction
 
-        self.activations = [nn.Sequential(nn.Softplus(), nn.Flatten(start_dim=0)) if l == 'time' else nn.Softmax(dim=1)
+        self.activations = [nn.Sequential(nn.Softplus(), nn.Flatten(start_dim=0)) if LMDataset.is_regression(l) else nn.Softmax(dim=1)
                             for l in self.label_classes]
 
         self.label_counts = [1 if x is None else len(x) for x in self.label_classes.values()]
@@ -405,8 +405,7 @@ def predict(argv=None):
     for i in range(len(predict_dataset.labels)):
         current_labels = predict_dataset.labels[i]
         logger.info(predict_dataset.label_type[i] + " - " + str(torch.unique(current_labels)))
-
-    # label_index_dict = {label: idx for idx, label in enumerate(predict_dataset.label_type)}
+        
 
     predict_loader = DataLoader(predict_dataset, batch_size=32, shuffle=False, drop_last=False, num_workers=3)
 
@@ -414,82 +413,67 @@ def predict(argv=None):
     trainer = L.Trainer(devices=1, accelerator=accelerator)
 
     logger.info("Running predictions")
-    predictions = trainer.predict(model, predict_loader)
-    breakpoint()
-    label_classes = model.label_classes
-    predictions = torch.cat(predictions).numpy()
 
-    #out_data = dict(predictions=predictions, true_labels=true_labels, label_classes=label_classes)
-    true_labels = []
-    if args.return_embeddings:
-        logger.info("Saving embeddings")
-        out_data = dict(predictions=predictions)
-        label_type = None
+
+    if not args.return_embeddings:
+        predictions = [torch.cat(l).numpy() for l in zip(*trainer.predict(model, predict_loader))]
+        true_labels = predict_dataset.labels
+        label_classes = model.label_classes        
+        out_data = dict()
+        
+        for pred, true, key in zip(predictions, true_labels, label_classes): 
+            true = true.numpy()
+            
+            out_data[key] = {
+                'output': pred,
+                'labels': true,
+            }
+            
+            if LMDataset.is_regression(key):  
+    
+                true_time_labels = true
+
+                mse = mean_squared_error(true_time_labels, pred)
+                mae = mean_absolute_error(true_time_labels, pred)
+                r2 = r2_score(true_time_labels, pred)
+
+                logger.info(f"Mode: Regression for {key}")
+                logger.info(f"Mean Squared Error: {mse:.4f}")
+                logger.info(f"Mean Absolute Error: {mae:.4f}")
+                logger.info(f"R² Score: {r2:.4f}")
+
+                if args.save_residuals:
+                    logger.info("Calculating and saving residuals")
+                    residuals = true_time_labels - pred
+                    out_data['residuals'] = residuals
+
+            else:  
+                logger.info(f"Mode: Classification for {key}")
+
+                pred_labels = np.argmax(pred, axis=1)
+                
+                accuracy = accuracy_score(true, pred_labels)
+                precision = precision_score(true, pred_labels, average='weighted')
+                recall = recall_score(true, pred_labels, average='weighted')
+                conf_matrix = confusion_matrix(true, pred_labels)
+
+                logger.info(f"Accuracy: {accuracy:.4f}")
+                logger.info(f"Precision: {precision:.4f}")
+                logger.info(f"Recall: {recall:.4f}")
+                logger.info(f"Confusion Matrix:\n{conf_matrix}")
+                out_data[key]['pred'] = pred_labels
+                out_data[key]['classes'] = label_classes[key]
+
     else:
-        logger.info("Classifier mode: Saving predictions using classification / regression")
-
-        if true_labels is not None:
-            out_data = {'predictions': predictions, 'true_labels': true_labels, 'label_classes': label_classes}
-            for index, key in enumerate(label_classes):
-                for key in label_index_dict:
-                    index = label_index_dict[key]
-
-                    if key == 'time':
-                        time_predictions = predictions[:, index]
-                        true_time_labels = true_labels[index]
-
-                        mse = mean_squared_error(true_time_labels, time_predictions)
-                        mae = mean_absolute_error(true_time_labels, time_predictions)
-                        r2 = r2_score(true_time_labels, time_predictions)
-
-                        logger.info(f"Mode: Regression for {key}")
-                        logger.info(f"Mean Squared Error: {mse:.4f}")
-                        logger.info(f"Mean Absolute Error: {mae:.4f}")
-                        logger.info(f"R² Score: {r2:.4f}")
-
-                        if args.save_residuals:
-                            logger.info("Calculating and saving residuals")
-                            residuals = true_time_labels - time_predictions
-                            out_data['residuals'] = residuals
-
-                        out_data['true_labels_time'] = true_time_labels
-                        out_data['pred_labels_time'] = time_predictions
-
-                else:
-                    logger.info(f"Mode: Classification for {key}")
-
-                    num_classes = model.label_counts[key]
-
-                    label_predictions = predictions[:, index:index + num_classes]
-                    pred_labels = np.argmax(label_predictions, axis=1)
-
-                    accuracy = accuracy_score(true_labels[index], pred_labels)
-                    precision = precision_score(true_labels[index], pred_labels, average='weighted')
-                    recall = recall_score(true_labels[index], pred_labels, average='weighted')
-                    conf_matrix = confusion_matrix(true_labels[index], pred_labels)
-
-                    logger.info(f"Accuracy: {accuracy:.4f}")
-                    logger.info(f"Precision: {precision:.4f}")
-                    logger.info(f"Recall: {recall:.4f}")
-                    logger.info(f"Confusion Matrix:\n{conf_matrix}")
-
-                    correct_incorrect = np.where(pred_labels == true_labels[index], 1, 0)
-                    out_data['correct_incorrect'] = correct_incorrect
-
-                    out_data[f'true_labels_{key}'] = true_labels[index]
-                    out_data[f'pred_labels_{key}'] = pred_labels
-                    out_data[f'label_predictions_{key}'] = label_predictions
-
-        else:
-            out_data = dict(predictions=predictions)
+        predictions = trainer.predict(model, predict_loader)
+        out_data = dict(embeddings=predictions)
 
     if not args.pred_only:
         dset = predict_dataset
         out_data['images'] = np.asarray(torch.squeeze(dset.data))
         for key in dset.metadata:
             out_data[key] = np.asarray(dset.metadata[key])
-        # for i, k in enumerate(dset.label_type):                   # no need for this as we are anyways obtaining the key wise labels
-        #     out_data[k + "_labels"] = np.asarray(dset.labels[i])
+
 
     np.savez(args.output_npz, **out_data)
 

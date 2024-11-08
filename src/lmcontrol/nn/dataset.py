@@ -64,6 +64,12 @@ class Norm(T._transform.Transform):
 
 
 class LMDataset(Dataset):
+    
+    __regression_labels = {'time'}
+    
+    @classmethod
+    def is_regression(cls, label):
+        return label in cls.__regression_labels
 
     def __init__(self, npzs, label_classes=None, use_masks=False, return_labels=False, logger=None, transform=None, label_type=None, n_samples=None, return_embeddings=None, split=None, val_size=None, seed=None):
         """
@@ -99,7 +105,7 @@ class LMDataset(Dataset):
             for k in label_type:
                 self.label_type.append(k)
 
-                if k == 'time':
+                if self.is_regression(k):
                     labels = torch.from_numpy(encode_labels(metadata[k], 'regression'))
                     self.label_classes[k] = None
                 else:
