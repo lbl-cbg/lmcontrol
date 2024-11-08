@@ -431,11 +431,9 @@ def predict(argv=None):
             
             if LMDataset.is_regression(key):  
     
-                true_time_labels = true
-
-                mse = mean_squared_error(true_time_labels, pred)
-                mae = mean_absolute_error(true_time_labels, pred)
-                r2 = r2_score(true_time_labels, pred)
+                mse = mean_squared_error(true, pred)
+                mae = mean_absolute_error(true, pred)
+                r2 = r2_score(true, pred)
 
                 logger.info(f"Mode: Regression for {key}")
                 logger.info(f"Mean Squared Error: {mse:.4f}")
@@ -444,7 +442,7 @@ def predict(argv=None):
 
                 if args.save_residuals:
                     logger.info("Calculating and saving residuals")
-                    residuals = true_time_labels - pred
+                    residuals = true - pred
                     out_data['residuals'] = residuals
 
             else:  
@@ -467,12 +465,15 @@ def predict(argv=None):
     else:
         predictions = trainer.predict(model, predict_loader)
         out_data = dict(embeddings=predictions)
-
+    
+    
     if not args.pred_only:
         dset = predict_dataset
         out_data['images'] = np.asarray(torch.squeeze(dset.data))
+        #out_data['metadata'] = dict()
         for key in dset.metadata:
-            out_data[key] = np.asarray(dset.metadata[key])
+            new_key = f"metadata_{key}"  
+            out_data[new_key] = np.asarray(dset.metadata[key])
 
 
     np.savez(args.output_npz, **out_data)
