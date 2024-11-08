@@ -26,7 +26,7 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
 from lightning.pytorch.callbacks import ModelCheckpoint
-from torchvision.models.resnet import BasicBlock, Bottleneck 
+from torchvision.models.resnet import BasicBlock, Bottleneck
 from typing import Type, Union, List, Optional, Callable, Any
 from optuna.integration import PyTorchLightningPruningCallback
 
@@ -36,88 +36,134 @@ from .dataset import LMDataset, get_transforms as _get_transforms
 from lmcontrol.nn.resnet import ResNet
 
 
+class MultiLabelLoss(nn.Module):
+
+    def __init__(self, criteria, weights=None):
+        super().__init__()
+        self.criteria = criteria
+        self.weights = torch.ones(len(criteria)) if weights is not None else torch.as_tensor(weights)
+
+    def forward(self, input, target):
+        ret = list()
+        for _input, _target, _criterion, _weight in zip(input, target, self.criteria, self.weights):
+            ret.append(_weight * _criterion(_input, _target))
+        return ret
+
+
+class CrossEntropy(nn.Module):
+
+    def __init__(self):
+        super().__init__()
+        self.nlll = nn.NLLLoss()
+
+    def forward(self, input, target):
+        return self.nlll(torch.log(input), target)
+
+
 class LightningResNet(L.LightningModule):
 
     val_metric = "validation_ncs"
     train_metric = "train_ncs"
 
-    def __init__(self, num_outputs=1, lr=0.01, step_size=2, gamma=0.1, planes=[8, 16, 32, 64], layers=[1, 1, 1, 1], block=BasicBlock, return_embeddings=False, label_type='time'):
+    loss_functions = {
+        'time': nn.MSELoss(),
+        'sample': CrossEntropy(),
+        'condition': CrossEntropy(),
+        'feed': CrossEntropy(),
+        'starting_media': CrossEntropy()
+    }
+
+    loss_weights = {
+        'time': 1e-3,
+        'sample': 1,
+        'condition': 1,
+        'feed': 1,
+        'starting_media': 1
+    }
+
+    def __init__(self, label_classes, lr=0.01, step_size=2, gamma=0.1, planes=[8, 16, 32, 64],
+                 layers=[1, 1, 1, 1], block=BasicBlock, return_embeddings=False):
         super().__init__()
 
-        weights = None 
-        progress = True
+        self.label_classes = label_classes       # carry over labels into prediction
 
-        self.loss_functions = {
-            'time': nn.MSELoss(),
-            'sample': nn.CrossEntropyLoss(),
-            'condition': nn.CrossEntropyLoss(),
-            'feed': nn.CrossEntropyLoss(),  
-            'starting media': nn.CrossEntropyLoss()  
-        }
-        if label_type not in self.loss_functions:
-            raise ValueError(f"Unknown label type: {label_type}. Expected one of {list(self.loss_functions.keys())}")
-        
-        self.backbone = ResNet(label_type=label_type, block=block, layers=layers, planes=planes, num_outputs=num_outputs, return_embeddings=return_embeddings)
-        if label_type == 'time':
-            self.backbone = nn.Sequential(self.backbone, nn.Softplus(), nn.Flatten(start_dim=1))
-        self.criterion = self.loss_functions[label_type]
-        self.save_hyperparameters()
-        self.label_type = label_type
+        self.activations = [nn.Sequential(nn.Softplus(), nn.Flatten(start_dim=0)) if LMDataset.is_regression(l) else nn.Softmax(dim=1)
+                            for l in self.label_classes]
+
+        self.label_counts = [1 if x is None else len(x) for x in self.label_classes.values()]
+
+        self.num_outputs = sum(self.label_counts)
+
+        self.criterion = MultiLabelLoss([self.loss_functions[l] for l in self.label_classes],
+                                        weights=[self.loss_weights[l] for l in self.label_classes])
+
+
+        self.backbone = ResNet(block=block, layers=layers, planes=planes, num_outputs=self.num_outputs,
+                               return_embeddings=return_embeddings)
+
         self.lr = lr
         self.step_size = step_size
         self.gamma = gamma
         self.block = block
         self.planes = planes
         self.layers = layers
-        
+        self.save_hyperparameters()
+
     def forward(self, x):
-        return self.backbone(x)
+        outputs = self.backbone(x)
+        ret = list()
+        start_idx = 0
+        for act, count in zip(self.activations, self.label_counts):
+            end_idx = start_idx + count
+            ret.append(act(outputs[:, start_idx:end_idx]))
+            start_idx = end_idx
+        return tuple(ret)
+
+    def _score(self, step_type, outputs, loss_components, true_labels):
+        ret = torch.tensor(0, device=outputs[0].device)
+        for _label_type, _output, _loss, _label in zip(self.label_classes, outputs, loss_components, true_labels):
+            _classes = self.label_classes[_label_type]
+            if _classes is None:
+                self.log(f"{step_type}_{_label_type}_loss", _loss, on_step=False, on_epoch=True)
+                r2 = r2_score(_label.cpu().detach().numpy(), _output.cpu().detach().numpy())
+                self.log(f"{step_type}_{_label_type}_r2", r2, on_step=False, on_epoch=True)
+            else:
+                self.log(f"{step_type}_{_label_type}_loss", _loss, on_step=False, on_epoch=True)
+                preds = torch.argmax(_output, dim=1)
+                acc = accuracy_score(_label.cpu().numpy(), preds.cpu().numpy())
+                self.log(f"{step_type}_{_label_type}_accuracy", acc, on_step=False, on_epoch=True)
 
     def training_step(self, batch, batch_idx):
         images, labels = batch
         outputs = self.forward(images)
-        loss = self.criterion(outputs, labels[:, 0]) 
+        loss_components = self.criterion(outputs, labels)
 
-        if self.label_type != 'time':
-            preds = torch.argmax(outputs, dim=1)
-            acc = accuracy_score(labels[:, 0].cpu().numpy(), preds.cpu().numpy())
-            self.log('train_accuracy', acc, on_step=False, on_epoch=True, prog_bar=True)
-            self.log('train_loss', loss, on_epoch=True)
-        elif self.label_type == 'time':
-            self.log('train_loss', loss, on_epoch=True)
-        else:
-            raise ValueError("task_type must be either 'classification' or 'regression'")
-        return loss
+        self._score("train", outputs, loss_components, labels)
+        total_loss = sum(loss_components)
+        self.log('total_train_loss', total_loss, on_step=False, on_epoch=True)
+
+        return total_loss
 
     def validation_step(self, batch, batch_idx):
         images, labels = batch
         outputs = self.forward(images)
-        loss = self.criterion(outputs, labels[:, 0]) 
+        loss_components = self.criterion(outputs, labels)
 
-        if self.label_type != 'time':
-            preds = torch.argmax(outputs, dim=1)
-            acc = accuracy_score(labels[:, 0].cpu().numpy(), preds.cpu().numpy())
-            self.log('val_accuracy', acc, on_step=False, on_epoch=True, prog_bar=True)
-            self.log('val_loss', loss, on_epoch=True)
-        elif self.label_type == 'time':
-            self.log('val_loss', loss, on_epoch=True)
-        else:
-            raise ValueError("task_type must be either 'classification' or 'regression'")
-        return loss
+        self._score("val", outputs, loss_components, labels)
+        total_loss = sum(loss_components)
+        self.log('total_val_loss', total_loss, on_step=False, on_epoch=True)
+
+        return total_loss
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[10, 20, 30], gamma=self.gamma)
         return [optimizer], [scheduler]
 
-    def predict_step(self, batch, batch_idx, dataloader_idx=0):  
+    def predict_step(self, batch, batch_idx, dataloader_idx=0):
         x = batch[0]
         return self.forward(x)
 
-
-# def get_transform():
-#     transform = _get_transforms('float', 'norm','blur','rotate', 'crop','hflip', 'vflip', 'noise', 'rgb')
-#     return transform
 
 def get_block(block_type):
     return {
@@ -125,17 +171,20 @@ def get_block(block_type):
         'Bottleneck': Bottleneck
     }[block_type]
 
+
 def get_planes(plane_cmd):
-    p = int(plane_cmd)  
+    p = int(plane_cmd)
     return [2**p, 2**(p+1), 2**(p+2), 2**(p+3)]
 
+
 def get_layers(layers_cmd):
-    l = int(layers_cmd)  
-    layers = [1 if i < l else 0 for i in range(4)]  
+    l = int(layers_cmd)
+    layers = [1 if i < l else 0 for i in range(4)]
     return layers
 
+
 def _add_training_args(parser):
-    parser.add_argument('labels', type=str, choices=['time', 'feed', 'starting_media', 'condition', 'sample'], help="the label to train with")
+    parser.add_argument('labels', type=str, nargs='+', choices=['time', 'feed', 'starting_media', 'condition', 'sample'], help="the label to train with")
     parser.add_argument("--training", type=str, nargs='+', required=True, help="directories containing training data")
 
     grp = parser.add_mutually_exclusive_group()
@@ -150,7 +199,7 @@ def _add_training_args(parser):
     parser.add_argument("-n", "--n_samples", type=int, help="number of samples to use from each NPZ", default=None)
     parser.add_argument("--early_stopping", action='store_true', help="enable early stopping", default=False)
     parser.add_argument("-stop_wandb", "--stop_wandb", action='store_false', default=True, help="provide this flag to stop wandb")
-    parser.add_argument("--lr", type=float, help="learning rate", default=0.001)                               
+    parser.add_argument("--lr", type=float, help="learning rate", default=0.001)
     parser.add_argument("--step_size", type=int, help="step size for learning rate scheduler", default=10)
     parser.add_argument("--gamma", type=float, help="gamma for learning rate scheduler", default=0.1)
     parser.add_argument("--batch_size", type=int, help="batch size for training and validation", default=32)
@@ -160,12 +209,12 @@ def _add_training_args(parser):
     parser.add_argument("-save_emb", "--return_embeddings", action='store_true', default=False, help="saves embeddings, used for plotly/dash")
 
 def _get_loaders_and_model(args,  logger=None):
-    transform_train = _get_transforms('float', 'norm','blur','rotate', 'crop','hflip', 'vflip', 'noise', 'rgb') 
-    transform_val = _get_transforms('float', 'norm','blur','rotate', 'crop','hflip', 'vflip', 'noise', 'rgb')                                                        
+    transform_train = _get_transforms('float', 'norm','blur','rotate', 'crop','hflip', 'vflip', 'noise', 'rgb')
+    transform_val = _get_transforms('float', 'norm','blur','rotate', 'crop','hflip', 'vflip', 'noise', 'rgb')
 
     if args.val_frac:
         split_files = args.training
-        
+
         n = args.n_samples
 
         if logger is None:
@@ -174,14 +223,16 @@ def _get_loaders_and_model(args,  logger=None):
         logger.info(f"Loading training data from: {len(split_files)} files")
         train_dataset = LMDataset(split_files, transform=transform_train, logger=logger, return_labels=True, label_type=args.labels, n_samples=n, return_embeddings=args.return_embeddings, split='train', val_size=args.val_frac, seed=args.seed)
 
-        for i in range(train_dataset.labels.shape[1]):
-                logger.info(train_dataset.label_type[i] + " - " + str(torch.unique(train_dataset.labels[:, i])) + str(train_dataset.label_classes))
+        for i in range(len(train_dataset.labels)):
+                current_labels = train_dataset.labels[i]
+                logger.info(train_dataset.label_type[i] + " - " + str(torch.unique(current_labels)))
 
 
         logger.info(f"Loading validation data from: {len(split_files)} files")
-        val_dataset = LMDataset(split_files, transform=transform_val, logger=logger, return_labels=True, label_type=args.labels, n_samples=n, return_embeddings=args.return_embeddings, split='validate', val_size=args.val_frac, seed=args.seed)
-        for i in range(val_dataset.labels.shape[1]):
-            logger.info(val_dataset.label_type[i] + " - " + str(torch.unique(val_dataset.labels[:, i])) + str(val_dataset.label_classes))
+        val_dataset = LMDataset(split_files, label_classes=train_dataset.label_classes, transform=transform_val, logger=logger, return_labels=True, label_type=args.labels, n_samples=n, return_embeddings=args.return_embeddings, split='validate', val_size=args.val_frac, seed=args.seed)
+        for i in range(len(val_dataset.labels)):
+            current_labels = train_dataset.labels[i]
+            logger.info(val_dataset.label_type[i] + " - " + str(torch.unique(current_labels)))
 
     elif args.validation:
         train_files = args.training
@@ -195,14 +246,15 @@ def _get_loaders_and_model(args,  logger=None):
         logger.info(f"Loading training data: {len(train_files)} files")
         train_dataset = LMDataset(train_files, transform=transform_train, logger=logger, return_labels=True, label_type=args.labels, n_samples=n, return_embeddings=args.return_embeddings)
 
-        for i in range(train_dataset.labels.shape[1]):
-                logger.info(train_dataset.label_type[i] + " - " + str(torch.unique(train_dataset.labels[:, i])) + str(train_dataset.label_classes))
-
+        for i in range(len(train_dataset.labels)):
+                current_labels = train_dataset.labels[i]
+                logger.info(train_dataset.label_type[i] + " - " + str(torch.unique(current_labels)))
 
         logger.info(f"Loading validation data: {len(val_files)} files")
-        val_dataset = LMDataset(val_files, transform=transform_val, logger=logger, return_labels=True, label_type=args.labels, n_samples=n, return_embeddings=args.return_embeddings)
-        for i in range(val_dataset.labels.shape[1]):
-            logger.info(val_dataset.label_type[i] + " - " + str(torch.unique(val_dataset.labels[:, i])) + str(val_dataset.label_classes))
+        val_dataset = LMDataset(val_files, label_classes=train_dataset.label_classes, transform=transform_val, logger=logger, return_labels=True, label_type=args.labels, n_samples=n, return_embeddings=args.return_embeddings)
+        for i in range(len(val_dataset.labels)):
+            current_labels = train_dataset.labels[i]
+            logger.info(val_dataset.label_type[i] + " - " + str(torch.unique(current_labels)))
 
     else:
         print("You must specify --validation or --val_frac", file=sys.stderr)
@@ -213,72 +265,35 @@ def _get_loaders_and_model(args,  logger=None):
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, drop_last=True, num_workers=num_workers)
     val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, drop_last=True, num_workers=num_workers)
 
-    if args.labels != 'time':
-        num_outputs = len(train_dataset.label_classes[0])
-    elif args.labels == 'time':
-        num_outputs = 1
-    else:
-        raise ValueError("task_type must be either 'classification' or 'regression'")
 
-    model = LightningResNet(num_outputs=num_outputs,lr=args.lr, step_size=args.step_size, gamma=args.gamma, block=args.block, planes=args.planes, layers=args.layers, return_embeddings=args.return_embeddings, label_type=args.labels)
+    model = LightningResNet(train_dataset.label_classes, lr=args.lr, step_size=args.step_size, gamma=args.gamma,
+                            block=args.block, planes=args.planes, layers=args.layers, return_embeddings=args.return_embeddings)
 
     return train_loader, val_loader, model
 
 
-def _get_trainer(args, trial=None): 
+def _get_trainer(args, trial=None):
     accelerator = "gpu" if torch.cuda.is_available() else "cpu"
 
     callbacks = []
 
     targs = dict(max_epochs=args.epochs, devices=1, accelerator=accelerator, check_val_every_n_epoch=4, callbacks=callbacks)
-    
-    if args.labels != 'time':
-        if args.early_stopping:
-            early_stopping = EarlyStopping(
-            monitor="val_accuracy",
-            min_delta=0.0001,
-            patience=10,
-            verbose=False,
-            mode="max"
-            )
-            callbacks.append(early_stopping)
 
-        if args.checkpoint:
-            checkpoint_callback = ModelCheckpoint(
-                dirpath=args.checkpoint,  
-                filename="checkpoint-{epoch:02d}-{val_accuracy:.4f}",  
-                save_top_k=3, 
-                monitor="val_accuracy", 
-                mode="max"  
-            )
-            callbacks.append(checkpoint_callback)
-    elif args.labels == 'time':
-        if args.early_stopping:
-            early_stopping = EarlyStopping(
-            monitor="val_loss",
-            min_delta=0.0001,
-            patience=10,
-            verbose=False,
+    if args.checkpoint:
+        checkpoint_callback = ModelCheckpoint(
+            dirpath=args.checkpoint,
+            filename="checkpoint-{epoch:02d}-{total_val_loss:.4f}",
+            save_top_k=3,
+            monitor="total_val_loss",
             mode="min"
-            )
-            callbacks.append(early_stopping)
+        )
+        callbacks.append(checkpoint_callback)
 
-        if args.checkpoint:
-            checkpoint_callback = ModelCheckpoint(
-                dirpath=args.checkpoint,  
-                filename="checkpoint-{epoch:02d}-{val_loss:.4f}",  
-                save_top_k=3, 
-                monitor="val_loss", 
-                mode="min"  
-            )
-            callbacks.append(checkpoint_callback)
-    else:
-        raise ValueError("task_type must be either 'classification' or 'regression'")
-        
-    if trial is not None :   # if 'trial' is passed in, assume we are using Optuna to do HPO        
+
+    if trial is not None :   # if 'trial' is passed in, assume we are using Optuna to do HPO
         targs['logger'] = CSVLogger(args.outdir, name=args.experiment)
         if args.pruning:
-            callbacks.append(PyTorchLightningPruningCallback(trial, monitor="val_accuracy"))
+            callbacks.append(PyTorchLightningPruningCallback(trial, monitor="val_accuracy")) ## edit this for multilabels
     else:
         if args.stop_wandb:
             wandb.init(project="SX_HTY_Run1")
@@ -298,6 +313,7 @@ def train(argv=None):
     logger = get_logger('info')
 
     train_loader, val_loader, model = _get_loaders_and_model(args, logger=logger)
+
     trainer = _get_trainer(args)
     trainer.fit(model, train_loader, val_loader)
 
@@ -307,17 +323,16 @@ def objective(args, trial):
     args.step_size = trial.suggest_int('step_size', 5, 15, step=5)
     args.gamma = trial.suggest_float('gamma', 0.1, 0.5)
 
-
     block_type = trial.suggest_categorical('block_type', ['BasicBlock', 'Bottleneck'])
     args.block = get_block(block_type)
 
-    p = trial.suggest_categorical('planes', ['3', '4'])  
+    p = trial.suggest_categorical('planes', ['3', '4'])
     args.planes = get_planes(p)
 
-    l = trial.suggest_categorical('layers', ['1', '2', '3', '4'])  
+    l = trial.suggest_categorical('layers', ['1', '2', '3', '4'])
     args.layers = get_layers(l)
 
-    args.outdir = os.path.join(args.working_dir, "logs")   
+    args.outdir = os.path.join(args.working_dir, "logs")
     args.experiment = f"trial_{trial.number:04d}"
 
     train_loader, val_loader, model = _get_loaders_and_model(args)
@@ -343,11 +358,11 @@ def tune(argv=None):
     pkl = os.path.join(args.working_dir, "args.pkl")
     db = os.path.join(args.working_dir, "study.db")
     if not os.path.exists(pkl) or args.restart:
-        os.makedirs(args.working_dir, exist_ok=True) 
+        os.makedirs(args.working_dir, exist_ok=True)
         with open(pkl, 'wb') as file:
             pickle.dump(args, file)
         if args.restart and os.path.exists(db):
-            os.remove(db)                    
+            os.remove(db)
     else:
         with open(pkl, 'rb') as file:
             args = pickle.load(file)
@@ -361,7 +376,7 @@ def tune(argv=None):
 
 def predict(argv=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument('labels', type=str, help="the label to predict with")  
+    parser.add_argument('labels', type=str, nargs='+', choices=['time', 'feed', 'starting_media', 'condition', 'sample'], help="the label to predict with")
     parser.add_argument("--prediction", type=str, nargs='+', required=True, help="directories containing prediction data")
     parser.add_argument("-c", "--checkpoint", type=str, help="path to the model checkpoint file to use for inference")
     parser.add_argument("-o", "--output_npz", type=str, help="the path to save the embeddings to. Saved in NPZ format")
@@ -379,81 +394,81 @@ def predict(argv=None):
     predict_files = args.prediction
     n = args.n_samples
 
+
     logger.info(f"Loading prediction data: {len(predict_files)} files")
     predict_dataset = LMDataset(predict_files, transform=transform, logger=logger, return_labels=True, label_type=args.labels, n_samples=n, return_embeddings=args.return_embeddings)
-    for i in range(predict_dataset.labels.shape[1]):
-        logger.info(predict_dataset.label_type[i] + " - " + str(torch.unique(predict_dataset.labels[:, i])) + str(predict_dataset.label_classes))
+    
+    model = LightningResNet.load_from_checkpoint(args.checkpoint, label_classes=predict_dataset.label_classes, return_embeddings=args.return_embeddings)
 
-    true_labels = predict_dataset.labels[:, 0]
+    for i in range(len(predict_dataset.labels)):
+        current_labels = predict_dataset.labels[i]
+        logger.info(predict_dataset.label_type[i] + " - " + str(torch.unique(current_labels)))
+        
 
     predict_loader = DataLoader(predict_dataset, batch_size=32, shuffle=False, drop_last=False, num_workers=3)
 
-    model = LightningResNet.load_from_checkpoint(args.checkpoint, return_embeddings=args.return_embeddings)
     accelerator = "gpu" if torch.cuda.is_available() else "cpu"
     trainer = L.Trainer(devices=1, accelerator=accelerator)
-    
+
     logger.info("Running predictions")
-    predictions = trainer.predict(model, predict_loader)
-    predictions = torch.cat(predictions).numpy()
 
-    if args.return_embeddings:
-        logger.info("Saving embeddings")
-        out_data = dict(predictions=predictions)
-        label_type = None
+
+    if not args.return_embeddings:
+        predictions = [torch.cat(l).numpy() for l in zip(*trainer.predict(model, predict_loader))]
+        true_labels = predict_dataset.labels
+        label_classes = model.label_classes        
+        out_data = dict()
+        
+        for pred, true, key in zip(predictions, true_labels, label_classes): 
+            true = true.numpy()
+            
+            out_data[key] = {
+                'output': pred,
+                'labels': true,
+            }
+            
+            if LMDataset.is_regression(key):  
+    
+                mse = mean_squared_error(true, pred)
+                mae = mean_absolute_error(true, pred)
+                r2 = r2_score(true, pred)
+
+                logger.info(f"Mode: Regression for {key}")
+                logger.info(f"Mean Squared Error: {mse:.4f}")
+                logger.info(f"Mean Absolute Error: {mae:.4f}")
+                logger.info(f"R² Score: {r2:.4f}")
+
+                if args.save_residuals:
+                    logger.info("Calculating and saving residuals")
+                    residuals = true - pred
+                    out_data[key]['residuals'] = residuals
+
+            else:  
+                logger.info(f"Mode: Classification for {key}")
+
+                pred_labels = np.argmax(pred, axis=1)
+                
+                accuracy = accuracy_score(true, pred_labels)
+                precision = precision_score(true, pred_labels, average='weighted')
+                recall = recall_score(true, pred_labels, average='weighted')
+                conf_matrix = confusion_matrix(true, pred_labels)
+
+                logger.info(f"Accuracy: {accuracy:.4f}")
+                logger.info(f"Precision: {precision:.4f}")
+                logger.info(f"Recall: {recall:.4f}")
+                logger.info(f"Confusion Matrix:\n{conf_matrix}")
+                out_data[key]['pred'] = pred_labels
+                out_data[key]['classes'] = label_classes[key]
+
     else:
-        logger.info("Classifier mode: Saving predictions using classification / regression")
-
-        if true_labels is not None:
-            if args.labels != 'time':
-                    logger.info("mode:classification")
-                    pred_labels = np.argmax(predictions, axis=1)
-
-                    accuracy = accuracy_score(true_labels, pred_labels)
-                    precision = precision_score(true_labels, pred_labels, average='weighted')
-                    recall = recall_score(true_labels, pred_labels, average='weighted')
-                    conf_matrix = confusion_matrix(true_labels, pred_labels)
-
-                    logger.info(f"Accuracy: {accuracy:.4f}")
-                    logger.info(f"Precision: {precision:.4f}")
-                    logger.info(f"Recall: {recall:.4f}")
-                    logger.info(f"Confusion Matrix:\n{conf_matrix}")
-
-                    out_data = dict(predictions=predictions, true_labels=true_labels, pred_labels=pred_labels)
-                    correct_incorrect = np.where(pred_labels == true_labels, 1, 0)
-                    out_data['correct_incorrect'] = correct_incorrect
-
-            elif args.labels == 'time': 
-                    logger.info("mode:regression")
-                    pred_labels = np.argmax(predictions, axis=0)
-                    pred_values = predictions.flatten()
-
-                    mse = mean_squared_error(true_labels, pred_values)
-                    mae = mean_absolute_error(true_labels, pred_values)
-                    r2 = r2_score(true_labels, pred_values)
-
-                    logger.info(f"Mean Squared Error: {mse:.4f}")
-                    logger.info(f"Mean Absolute Error: {mae:.4f}")
-                    logger.info(f"R² Score: {r2:.4f}")
-
-                    if args.save_residuals:
-                        logger.info("Calculating and saving residuals")
-                        residuals = true_labels - pred_values
-                        out_data = dict(predictions=predictions, true_values=true_labels, pred_values=pred_values, residuals=residuals)
-                    else:
-                        out_data = dict(predictions=predictions, true_labels=true_labels, pred_labels=pred_values)
-            else:
-                raise ValueError("task_type must be either 'classification' or 'regression'")
-
-        else:
-            out_data = dict(predictions=predictions, pred_labels=pred_values)
-
+        predictions = trainer.predict(model, predict_loader)
+        out_data = dict(embeddings=predictions)
+    
+    
     if not args.pred_only:
         dset = predict_dataset
         out_data['images'] = np.asarray(torch.squeeze(dset.data))
-        for key in dset.metadata:
-            out_data[key] = np.asarray(dset.metadata[key])
-        for i, k in enumerate(dset.label_type):
-            out_data[k + "_labels"] = np.asarray(dset.labels[:, i])
+        out_data['metadata'] = {key: np.asarray(dset.metadata[key]) for key in dset.metadata}
 
     np.savez(args.output_npz, **out_data)
 

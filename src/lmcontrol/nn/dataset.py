@@ -64,8 +64,14 @@ class Norm(T._transform.Transform):
 
 
 class LMDataset(Dataset):
+    
+    __regression_labels = {'time'}
+    
+    @classmethod
+    def is_regression(cls, label):
+        return label in cls.__regression_labels
 
-    def __init__(self, npzs, use_masks=False, return_labels=False, logger=None, transform=None, label_type=None, n_samples=None, return_embeddings=None, split=None, val_size=None, seed=None):
+    def __init__(self, npzs, label_classes=None, use_masks=False, return_labels=False, logger=None, transform=None, label_type=None, n_samples=None, return_embeddings=None, split=None, val_size=None, seed=None):
         """
         Args:
             npzs (array-like)       : A list or tuple of paths to NPZ files containing cropped images
@@ -76,8 +82,6 @@ class LMDataset(Dataset):
             raise ValueError("Got empty array-like for argument 'npzs'")
         logger = logger or get_logger('warning')
 
-        mode = 'regression' if label_type == 'time' else 'classification'
-
         masks, images, paths, metadata = load_npzs(npzs, logger, n_samples, label_type)
         if use_masks:
             self.data = masks
@@ -87,58 +91,65 @@ class LMDataset(Dataset):
         self.paths = tuple(paths)
         self.transform = transform
 
-
         if not isinstance(label_type, (tuple, list)):
             label_type = [label_type]
 
         self.labels = None
-        self.label_classes = None
+        self.label_classes = label_classes
         self.label_type = None
+
         if return_labels:
-            tmp = list()
-            self.label_type = list()
-            self.label_classes = list()
-            for k in metadata:
-                if k not in label_type:
-                    continue
+            tmp = []
+            self.label_type = []
+            self.label_classes = {}
+            for k in label_type:
                 self.label_type.append(k)
-                if mode == 'regression':
-                    labels = encode_labels(metadata[k], label_type)  
-                elif mode == 'classification':     
-                    labels, classes = encode_labels(metadata[k], label_type)
-                    self.label_classes.append(classes)
+
+                if self.is_regression(k):
+                    labels = torch.from_numpy(encode_labels(metadata[k], 'regression'))
+                    self.label_classes[k] = None
                 else:
-                    raise ValueError("task_type must be either 'classification' or 'regression'")
+
+                    labels_np, classes = encode_labels(metadata[k], 'classification', classes=self.label_classes.get(k), return_classes=True)
+                    labels = torch.from_numpy(labels_np)
+                    self.label_classes[k] = classes
+
                 tmp.append(labels)
-            self.labels = torch.from_numpy(np.stack(tmp, axis=1))
+
+            self.labels = tmp
             self.metadata = metadata
-            
+
         if val_size:
             self._split_data(split, val_size, seed)
 
-
     def _split_data(self, split, val_size, seed):
-
         num_samples = len(self.data)
         indices = np.arange(num_samples)
-    
-        train_indices, val_indices = train_test_split(indices, test_size=val_size, random_state=seed, stratify=self.labels)
+
+        stratify_label = np.stack([label.numpy() for label in self.labels], axis=1)
+        composite_label = [tuple(row) for row in stratify_label]
+
+        train_indices, val_indices = train_test_split(
+            indices, test_size=val_size, random_state=seed, stratify=composite_label
+        )
 
         if split == 'train':
             self.data = self.data[train_indices]
-            if self.labels is not None:
-                self.labels = self.labels[train_indices]
+            self.labels = [label[train_indices] for label in self.labels]
         elif split == 'validate':
             self.data = self.data[val_indices]
-            if self.labels is not None:
-                self.labels = self.labels[val_indices]
+            self.labels = [label[val_indices] for label in self.labels]
 
     def __getitem__(self, i):
         ret = self.data[i]
         if self.transform is not None:
             ret = self.transform(ret)
-        labels = -1 if self.labels is None else self.labels[i]
-        return ret, labels
+        if self.labels is None:
+            return ret
+        else:
+            # length of self.labels is same as that of label_types
+            ret_tmp = [self.labels[j][i] for j in range(len(self.labels))]
+            return ret, tuple(ret_tmp)
 
     def __len__(self):
         return len(self.data)

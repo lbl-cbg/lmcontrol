@@ -1,7 +1,7 @@
 from functools import partial
 from typing import Any, Callable, List, Optional, Type, Union
 
-from torchvision.utils import _log_api_usage_once   
+from torchvision.utils import _log_api_usage_once
 from torchvision.models.resnet import Bottleneck, BasicBlock, conv1x1, conv3x3
 from torchvision.models._utils import _ovewrite_named_param
 from torchvision.models._api import register_model, Weights, WeightsEnum
@@ -16,11 +16,10 @@ from torchvision.models._utils import _ovewrite_named_param, handle_legacy_inter
 class ResNet(nn.Module):
     def __init__(
         self,
-        label_type: 'str',
         block: Type[Union[BasicBlock, Bottleneck]],
         layers: List[int],
         planes: List[int],
-        num_outputs: int, 
+        num_outputs: int,
         zero_init_residual: bool = False,
         groups: int = 1,
         width_per_group: int = 64,
@@ -34,7 +33,7 @@ class ResNet(nn.Module):
             norm_layer = nn.BatchNorm2d
         self._norm_layer = norm_layer
 
-        self.inplanes = planes[0] 
+        self.inplanes = planes[0]
         self.dilation = 1
         if replace_stride_with_dilation is None:
             # each element in the tuple indicates if we should replace
@@ -55,16 +54,16 @@ class ResNet(nn.Module):
 
         if planes is None:
             planes = [64, 128, 256, 512]
-            
+
         self.layer1 = self._make_layer(block, planes[0], layers[0])
         self.layer2 = self._make_layer(block, planes[1], layers[1], stride=2, dilate=replace_stride_with_dilation[0])
         self.layer3 = self._make_layer(block, planes[2], layers[2], stride=2, dilate=replace_stride_with_dilation[1])
         self.layer4 = self._make_layer(block, planes[3], layers[3], stride=2, dilate=replace_stride_with_dilation[2])
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        idx = max(i for i in range(len(layers)) if layers[i] != 0)  
+        idx = max(i for i in range(len(layers)) if layers[i] != 0)
 
         if block == BasicBlock:
-            expansion = [1, 1, 1, 1] 
+            expansion = [1, 1, 1, 1]
         elif block == Bottleneck:
             expansion = [4, 4, 4, 4]
 
@@ -72,14 +71,8 @@ class ResNet(nn.Module):
         idx = max(i for i in range(len(layers)) if layers[i] != 0)
         n_features = planes[idx] * expansion[idx]
 
-        # add loop using self
-        if label_type != 'time':
-            self.fc = nn.Linear(n_features, num_outputs)
-        elif label_type == 'time':
-            self.fc = nn.Linear(n_features, 1)
-        else:
-            raise ValueError("mode must be either 'classification' or 'regression'")
-        
+        self.fc = nn.Linear(n_features, num_outputs)
+
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
@@ -105,7 +98,7 @@ class ResNet(nn.Module):
         stride: int = 1,
         dilate: bool = False,
     ) -> nn.Sequential:
-        if blocks == 0:  
+        if blocks == 0:
             return nn.Identity()
         norm_layer = self._norm_layer
         downsample = None
@@ -125,7 +118,7 @@ class ResNet(nn.Module):
                 self.inplanes, planes, stride, downsample, self.groups, self.base_width, previous_dilation, norm_layer
             )
         )
-    
+
         self.inplanes = planes * block.expansion  # Not good to change self
 
         for _ in range(1, blocks):
@@ -144,7 +137,7 @@ class ResNet(nn.Module):
 
     def _forward_impl(self, x: Tensor) -> Tensor:
         # See note [TorchScript super()]
-        
+
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
