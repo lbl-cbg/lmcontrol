@@ -129,7 +129,7 @@ class LightningResNet(L.LightningModule):
                 self.log(f"{step_type}_{_label_type}_loss", _loss, on_step=False, on_epoch=True)
                 preds = torch.argmax(_output, dim=1)
                 acc = accuracy_score(_label.cpu().numpy(), preds.cpu().numpy())
-                self.log(f"{step_type}_{_label_type}_accuracy", _loss, on_step=False, on_epoch=True)
+                self.log(f"{step_type}_{_label_type}_accuracy", acc, on_step=False, on_epoch=True)
 
     def training_step(self, batch, batch_idx):
         images, labels = batch
@@ -262,10 +262,6 @@ def _get_loaders_and_model(args,  logger=None):
 
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, drop_last=True, num_workers=num_workers)
     val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, drop_last=True, num_workers=num_workers)
-
-    # label_index_dict = {label: idx for idx, label in enumerate(train_dataset.label_type)}
-    # for label_type, index in label_index_dict.items():
-    #     print(f"{label_type}: {index}")
 
 
     model = LightningResNet(train_dataset.label_classes, lr=args.lr, step_size=args.step_size, gamma=args.gamma,
@@ -443,7 +439,7 @@ def predict(argv=None):
                 if args.save_residuals:
                     logger.info("Calculating and saving residuals")
                     residuals = true - pred
-                    out_data['residuals'] = residuals
+                    out_data[key]['residuals'] = residuals
 
             else:  
                 logger.info(f"Mode: Classification for {key}")
@@ -470,11 +466,7 @@ def predict(argv=None):
     if not args.pred_only:
         dset = predict_dataset
         out_data['images'] = np.asarray(torch.squeeze(dset.data))
-        #out_data['metadata'] = dict()
-        for key in dset.metadata:
-            new_key = f"metadata_{key}"  
-            out_data[new_key] = np.asarray(dset.metadata[key])
-
+        out_data['metadata'] = {key: np.asarray(dset.metadata[key]) for key in dset.metadata}
 
     np.savez(args.output_npz, **out_data)
 
