@@ -73,19 +73,21 @@ class LightningResNet(L.LightningModule):
         'starting_media': CrossEntropy()
     }
 
-    loss_weights = {
-        'time': 1e-3,
-        'sample': 1,
-        'condition': 1,
-        'feed': 1,
-        'starting_media': 1
-    }
 
     def __init__(self, label_classes, lr=0.01, step_size=2, gamma=0.1, planes=[8, 16, 32, 64],
-                 layers=[1, 1, 1, 1], block=BasicBlock, return_embeddings=False):
+                 layers=[1, 1, 1, 1], block=BasicBlock, return_embeddings=False, weight1=1e-3, weight2=1, weight3=1, weight4=1, weight5=1):
         super().__init__()
 
-        self.label_classes = label_classes       # carry over labels into prediction
+        self.loss_weights = {
+            'time': weight1,  
+            'sample': weight2,
+            'condition': weight3,
+            'feed': weight4,
+            'starting_media': weight5
+        }
+
+
+        self.label_classes = label_classes      
 
         self.activations = [nn.Sequential(nn.Softplus(), nn.Flatten(start_dim=0)) if LMDataset.is_regression(l) else nn.Softmax(dim=1)
                             for l in self.label_classes]
@@ -132,7 +134,8 @@ class LightningResNet(L.LightningModule):
                 preds = torch.argmax(_output, dim=1)
                 acc = accuracy_score(_label.cpu().numpy(), preds.cpu().numpy())
                 self.log(f"{step_type}_{_label_type}_accuracy", acc, on_step=False, on_epoch=True)
-
+                
+        
     def training_step(self, batch, batch_idx):
         images, labels = batch
         outputs = self.forward(images)
@@ -149,6 +152,30 @@ class LightningResNet(L.LightningModule):
         outputs = self.forward(images)
         loss_components = self.criterion(outputs, labels)
 
+        total_r2 = 0
+        total_accuracy = 0
+        regression_tasks = 0
+        classification_tasks = 0
+
+        for pred, true, key in zip(outputs, labels, self.label_classes):
+            if LMDataset.is_regression(key):
+                r2_score_val = r2_score(true.cpu().numpy(), pred.cpu().numpy())
+                self.log(f'val_{key}_r2', r2_score_val, on_step=False, on_epoch=True)
+                total_r2 += r2_score_val
+                regression_tasks += 1
+            else:
+                pred_labels = np.argmax(pred.cpu().detach().numpy(), axis=1)
+                accuracy = accuracy_score(true.cpu().numpy(), pred_labels)
+                self.log(f'val_{key}_accuracy', accuracy, on_step=False, on_epoch=True)
+                total_accuracy += accuracy
+                classification_tasks += 1
+
+        mean_r2 = total_r2 / regression_tasks if regression_tasks > 0 else 0
+        mean_accuracy = total_accuracy / classification_tasks if classification_tasks > 0 else 0
+
+        self.log('val_mean_r2', mean_r2, on_step=False, on_epoch=True)
+        self.log('val_mean_accuracy', mean_accuracy, on_step=False, on_epoch=True)
+                    
         self._score("val", outputs, loss_components, labels)
         total_loss = sum(loss_components)
         self.log('total_val_loss', total_loss, on_step=False, on_epoch=True)
@@ -279,6 +306,7 @@ def _get_trainer(args, trial=None):
 
     targs = dict(max_epochs=args.epochs, devices=1, accelerator=accelerator, check_val_every_n_epoch=4, callbacks=callbacks)
 
+    # should we use r2 score and val_accuracy for measurement 
     if args.checkpoint:
         checkpoint_callback = ModelCheckpoint(
             dirpath=args.checkpoint,
@@ -293,7 +321,8 @@ def _get_trainer(args, trial=None):
     if trial is not None :   # if 'trial' is passed in, assume we are using Optuna to do HPO
         targs['logger'] = CSVLogger(args.outdir, name=args.experiment)
         if args.pruning:
-            callbacks.append(PyTorchLightningPruningCallback(trial, monitor="val_accuracy")) ## edit this for multilabels
+            callbacks.append(PyTorchLightningPruningCallback(trial, monitor="combined_metric"))
+
     else:
         if args.stop_wandb:
             wandb.init(project="SX_HTY_Run1")
@@ -322,6 +351,11 @@ def objective(args, trial):
     args.lr = trial.suggest_float("lr", 1e-5, 1e-2, log=True)
     args.step_size = trial.suggest_int('step_size', 5, 15, step=5)
     args.gamma = trial.suggest_float('gamma', 0.1, 0.5)
+    args.weight1 = trial.suggest_float('weight1', 0.0, 1.0)
+    args.weight2 = trial.suggest_float('weight2', 0.0, 1.0)
+    args.weight3 = trial.suggest_float('weight3', 0.0, 1.0)
+    args.weight4 = trial.suggest_float('weight4', 0.0, 1.0)
+    args.weight5 = trial.suggest_float('weight5', 0.0, 1.0)
 
     block_type = trial.suggest_categorical('block_type', ['BasicBlock', 'Bottleneck'])
     args.block = get_block(block_type)
@@ -334,13 +368,18 @@ def objective(args, trial):
 
     args.outdir = os.path.join(args.working_dir, "logs")
     args.experiment = f"trial_{trial.number:04d}"
-
+    
     train_loader, val_loader, model = _get_loaders_and_model(args)
     trainer = _get_trainer(args, trial=trial)
     trainer.fit(model, train_loader, val_loader)
 
-    return trainer.callback_metrics["val_accuracy"].item()
-
+    val_accuracy = trainer.callback_metrics.get("val_mean_accuracy", None)
+    val_r2 = trainer.callback_metrics.get("val_mean_r2", None)
+    
+    combined_metric = 0.5 * (val_accuracy if val_accuracy is not None else 0) + \
+                      0.5 * (val_r2 if val_r2 is not None else 0)
+                      
+    return combined_metric
 
 def tune(argv=None):
     parser = argparse.ArgumentParser()
