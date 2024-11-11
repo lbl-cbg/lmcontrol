@@ -75,7 +75,7 @@ class LightningResNet(L.LightningModule):
 
 
     def __init__(self, label_classes, lr=0.01, step_size=2, gamma=0.1, planes=[8, 16, 32, 64],
-                 layers=[1, 1, 1, 1], block=BasicBlock, return_embeddings=False, weight1=1e-3, weight2=1, weight3=1, weight4=1, weight5=1):
+                 layers=[1, 1, 1, 1], block=BasicBlock, return_embeddings=False, weight1=0.871, weight2=0.718, weight3=0.861, weight4=0.760, weight5=0.141):
         super().__init__()
 
         self.loss_weights = {
@@ -121,19 +121,37 @@ class LightningResNet(L.LightningModule):
             start_idx = end_idx
         return tuple(ret)
 
+    
     def _score(self, step_type, outputs, loss_components, true_labels):
-        ret = torch.tensor(0, device=outputs[0].device)
+        total_r2 = 0
+        total_accuracy = 0
+        regression_tasks = 0
+        classification_tasks = 0
+        
+        
         for _label_type, _output, _loss, _label in zip(self.label_classes, outputs, loss_components, true_labels):
             _classes = self.label_classes[_label_type]
-            if _classes is None:
-                self.log(f"{step_type}_{_label_type}_loss", _loss, on_step=False, on_epoch=True)
+            self.log(f"{step_type}_{_label_type}_loss", _loss, on_step=False, on_epoch=True)
+            
+            if _classes is None:  
                 r2 = r2_score(_label.cpu().detach().numpy(), _output.cpu().detach().numpy())
                 self.log(f"{step_type}_{_label_type}_r2", r2, on_step=False, on_epoch=True)
-            else:
-                self.log(f"{step_type}_{_label_type}_loss", _loss, on_step=False, on_epoch=True)
+                total_r2 += r2
+                regression_tasks += 1
+            else: 
                 preds = torch.argmax(_output, dim=1)
                 acc = accuracy_score(_label.cpu().numpy(), preds.cpu().numpy())
                 self.log(f"{step_type}_{_label_type}_accuracy", acc, on_step=False, on_epoch=True)
+                total_accuracy += acc
+                classification_tasks += 1
+        
+        if regression_tasks > 0:
+            mean_r2 = total_r2 / regression_tasks
+            self.log(f'{step_type}_mean_r2', mean_r2, on_step=False, on_epoch=True)
+        if classification_tasks > 0:
+            mean_accuracy = total_accuracy / classification_tasks
+            self.log(f'{step_type}_mean_accuracy', mean_accuracy, on_step=False, on_epoch=True)
+
                 
         
     def training_step(self, batch, batch_idx):
@@ -147,41 +165,17 @@ class LightningResNet(L.LightningModule):
 
         return total_loss
 
+
     def validation_step(self, batch, batch_idx):
         images, labels = batch
         outputs = self.forward(images)
         loss_components = self.criterion(outputs, labels)
-
-        total_r2 = 0
-        total_accuracy = 0
-        regression_tasks = 0
-        classification_tasks = 0
-
-        for pred, true, key in zip(outputs, labels, self.label_classes):
-            if LMDataset.is_regression(key):
-                r2_score_val = r2_score(true.cpu().numpy(), pred.cpu().numpy())
-                self.log(f'val_{key}_r2', r2_score_val, on_step=False, on_epoch=True)
-                total_r2 += r2_score_val
-                regression_tasks += 1
-            else:
-                pred_labels = np.argmax(pred.cpu().detach().numpy(), axis=1)
-                accuracy = accuracy_score(true.cpu().numpy(), pred_labels)
-                self.log(f'val_{key}_accuracy', accuracy, on_step=False, on_epoch=True)
-                total_accuracy += accuracy
-                classification_tasks += 1
-
-        mean_r2 = total_r2 / regression_tasks if regression_tasks > 0 else 0
-        mean_accuracy = total_accuracy / classification_tasks if classification_tasks > 0 else 0
-
-        self.log('val_mean_r2', mean_r2, on_step=False, on_epoch=True)
-        self.log('val_mean_accuracy', mean_accuracy, on_step=False, on_epoch=True)
-                    
+        
         self._score("val", outputs, loss_components, labels)
+        
         total_loss = sum(loss_components)
         self.log('total_val_loss', total_loss, on_step=False, on_epoch=True)
-
-        return total_loss
-
+    
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[10, 20, 30], gamma=self.gamma)
