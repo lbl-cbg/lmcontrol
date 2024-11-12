@@ -75,15 +75,15 @@ class LightningResNet(L.LightningModule):
 
 
     def __init__(self, label_classes, lr=0.01, step_size=2, gamma=0.1, planes=[8, 16, 32, 64],
-                 layers=[1, 1, 1, 1], block=BasicBlock, return_embeddings=False, weight1=0.871, weight2=0.718, weight3=0.861, weight4=0.760, weight5=0.141):
+                 layers=[1, 1, 1, 1], block=BasicBlock, return_embeddings=False, weight1=0.0197): # weight2=1, weight3=1, weight4=1, weight5=1
         super().__init__()
 
         self.loss_weights = {
             'time': weight1,  
-            'sample': weight2,
-            'condition': weight3,
-            'feed': weight4,
-            'starting_media': weight5
+            'sample': 0,
+            'condition': 0,
+            'feed': 1-weight1,
+            'starting_media': 0
         }
 
 
@@ -345,12 +345,12 @@ def objective(args, trial):
     args.lr = trial.suggest_float("lr", 1e-5, 1e-2, log=True)
     args.step_size = trial.suggest_int('step_size', 5, 15, step=5)
     args.gamma = trial.suggest_float('gamma', 0.1, 0.5)
-    args.weight1 = trial.suggest_float('weight1', 0.0, 1.0)
-    args.weight2 = trial.suggest_float('weight2', 0.0, 1.0)
-    args.weight3 = trial.suggest_float('weight3', 0.0, 1.0)
-    args.weight4 = trial.suggest_float('weight4', 0.0, 1.0)
-    args.weight5 = trial.suggest_float('weight5', 0.0, 1.0)
-
+    args.weight1 = trial.suggest_float('weight1', 1e-5, 1.0, log=True)
+    # args.weight2 = trial.suggest_float('weight2', 1e-5, 1.0, log=True)
+    # args.weight3 = trial.suggest_float('weight3', 1e-5, 1.0, log=True)
+    # args.weight4 = trial.suggest_float('weight4', 1e-5, 1.0, log=True)
+    # args.weight5 = trial.suggest_float('weight5', 1e-5, 1.0, log=True)
+    
     block_type = trial.suggest_categorical('block_type', ['BasicBlock', 'Bottleneck'])
     args.block = get_block(block_type)
 
