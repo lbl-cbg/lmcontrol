@@ -68,21 +68,21 @@ class LightningResNet(L.LightningModule):
     loss_functions = {
         'time': nn.MSELoss(),
         'sample': CrossEntropy(),
-        'condition': CrossEntropy(),
+        'conditions': CrossEntropy(),
         'feed': CrossEntropy(),
         'starting_media': CrossEntropy()
     }
 
 
     def __init__(self, label_classes, lr=0.01, step_size=2, gamma=0.1, planes=[8, 16, 32, 64],
-                 layers=[1, 1, 1, 1], block=BasicBlock, return_embeddings=False, weight1=0.0197): # weight2=1, weight3=1, weight4=1, weight5=1
+                 layers=[1, 1, 1, 1], block=BasicBlock, return_embeddings=False, time_weight=1e-3): # weight2=1, weight3=1, weight4=1, weight5=1
         super().__init__()
 
         self.loss_weights = {
-            'time': weight1,  
+            'time': time_weight,  
             'sample': 0,
-            'condition': 0,
-            'feed': 1-weight1,
+            'conditions': 0,
+            'feed': 1-time_weight,
             'starting_media': 0
         }
 
@@ -205,7 +205,7 @@ def get_layers(layers_cmd):
 
 
 def _add_training_args(parser):
-    parser.add_argument('labels', type=str, nargs='+', choices=['time', 'feed', 'starting_media', 'condition', 'sample'], help="the label to train with")
+    parser.add_argument('labels', type=str, nargs='+', choices=['time', 'feed', 'starting_media', 'conditions', 'sample'], help="the label to train with")
     parser.add_argument("--training", type=str, nargs='+', required=True, help="directories containing training data")
 
     grp = parser.add_mutually_exclusive_group()
@@ -228,6 +228,7 @@ def _add_training_args(parser):
     parser.add_argument("--planes", type=get_planes, choices=['3', '4'], help="list of number of planes for each layer", default='4')
     parser.add_argument("--layers", type=get_layers, choices=['1', '2', '3', '4'], help="list of number of layers in each stage", default='4')
     parser.add_argument("-save_emb", "--return_embeddings", action='store_true', default=False, help="saves embeddings, used for plotly/dash")
+    parser.add_argument("--time_weight", type=float, help="loss function weight for time", default=0.001)
 
 def _get_loaders_and_model(args,  logger=None):
     transform_train = _get_transforms('float', 'norm','blur','rotate', 'crop','hflip', 'vflip', 'noise', 'rgb')
@@ -288,7 +289,7 @@ def _get_loaders_and_model(args,  logger=None):
 
 
     model = LightningResNet(train_dataset.label_classes, lr=args.lr, step_size=args.step_size, gamma=args.gamma,
-                            block=args.block, planes=args.planes, layers=args.layers, return_embeddings=args.return_embeddings)
+                            block=args.block, planes=args.planes, layers=args.layers, return_embeddings=args.return_embeddings, time_weight=args.time_weight)
 
     return train_loader, val_loader, model
 
@@ -341,24 +342,24 @@ def train(argv=None):
     trainer.fit(model, train_loader, val_loader)
 
 def objective(args, trial):
-    args.batch_size = trial.suggest_int('batch_size', 32, 256, log=True)
-    args.lr = trial.suggest_float("lr", 1e-5, 1e-2, log=True)
-    args.step_size = trial.suggest_int('step_size', 5, 15, step=5)
-    args.gamma = trial.suggest_float('gamma', 0.1, 0.5)
-    args.weight1 = trial.suggest_float('weight1', 1e-5, 1.0, log=True)
+    # args.batch_size = trial.suggest_int('batch_size', 32, 256, log=True)
+    # args.lr = trial.suggest_float("lr", 1e-5, 1e-2, log=True)
+    # args.step_size = trial.suggest_int('step_size', 5, 15, step=5)
+    # args.gamma = trial.suggest_float('gamma', 0.1, 0.5)
+    args.time_weight = trial.suggest_float('time_weight', 1e-5, 1.0, log=True)
     # args.weight2 = trial.suggest_float('weight2', 1e-5, 1.0, log=True)
     # args.weight3 = trial.suggest_float('weight3', 1e-5, 1.0, log=True)
     # args.weight4 = trial.suggest_float('weight4', 1e-5, 1.0, log=True)
     # args.weight5 = trial.suggest_float('weight5', 1e-5, 1.0, log=True)
     
-    block_type = trial.suggest_categorical('block_type', ['BasicBlock', 'Bottleneck'])
-    args.block = get_block(block_type)
+    # block_type = trial.suggest_categorical('block_type', ['BasicBlock', 'Bottleneck'])
+    # args.block = get_block(block_type)
 
-    p = trial.suggest_categorical('planes', ['3', '4'])
-    args.planes = get_planes(p)
+    # p = trial.suggest_categorical('planes', ['3', '4'])
+    # args.planes = get_planes(p)
 
-    l = trial.suggest_categorical('layers', ['1', '2', '3', '4'])
-    args.layers = get_layers(l)
+    # l = trial.suggest_categorical('layers', ['1', '2', '3', '4'])
+    # args.layers = get_layers(l)
 
     args.outdir = os.path.join(args.working_dir, "logs")
     args.experiment = f"trial_{trial.number:04d}"
@@ -370,10 +371,11 @@ def objective(args, trial):
     val_accuracy = trainer.callback_metrics.get("val_mean_accuracy", None)
     val_r2 = trainer.callback_metrics.get("val_mean_r2", None)
     
-    combined_metric = 0.5 * (val_accuracy if val_accuracy is not None else 0) + \
-                      0.5 * (val_r2 if val_r2 is not None else 0)
+    # combined_metric = 0.5 * (val_accuracy if val_accuracy is not None else 0) + \
+    #                   0.5 * (val_r2 if val_r2 is not None else 0)
                       
-    return combined_metric
+    # return combined_metric
+    return val_accuracy, val_r2
 
 def tune(argv=None):
     parser = argparse.ArgumentParser()
@@ -402,14 +404,14 @@ def tune(argv=None):
 
     obj = partial(objective, args)
 
-    study = optuna.create_study(storage=f"sqlite:///{db}", study_name="study", load_if_exists=True, direction="maximize")
-
+    study = optuna.create_study(storage=f"sqlite:///{db}", study_name="study", load_if_exists=True, directions=["maximize", "maximize"])
+    
     study.optimize(obj, n_trials=args.n_trials)
-
+    logger.info(f"Best trials: {study.best_trials}")
 
 def predict(argv=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument('labels', type=str, nargs='+', choices=['time', 'feed', 'starting_media', 'condition', 'sample'], help="the label to predict with")
+    parser.add_argument('labels', type=str, nargs='+', choices=['time', 'feed', 'starting_media', 'conditions', 'sample'], help="the label to predict with")
     parser.add_argument("--prediction", type=str, nargs='+', required=True, help="directories containing prediction data")
     parser.add_argument("-c", "--checkpoint", type=str, help="path to the model checkpoint file to use for inference")
     parser.add_argument("-o", "--output_npz", type=str, help="the path to save the embeddings to. Saved in NPZ format")
