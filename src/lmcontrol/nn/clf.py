@@ -109,17 +109,22 @@ class LightningResNet(L.LightningModule):
         self.block = block
         self.planes = planes
         self.layers = layers
+        self.return_embeddings = return_embeddings
         self.save_hyperparameters()
 
     def forward(self, x):
         outputs = self.backbone(x)
-        ret = list()
-        start_idx = 0
-        for act, count in zip(self.activations, self.label_counts):
-            end_idx = start_idx + count
-            ret.append(act(outputs[:, start_idx:end_idx]))
-            start_idx = end_idx
-        return tuple(ret)
+        if not self.return_embeddings:
+            ret = list()
+            start_idx = 0
+            for act, count in zip(self.activations, self.label_counts):
+                end_idx = start_idx + count
+                ret.append(act(outputs[:, start_idx:end_idx]))
+                start_idx = end_idx
+            return tuple(ret)
+        else:
+            
+            return outputs
 
     
     def _score(self, step_type, outputs, loss_components, true_labels):
@@ -497,7 +502,20 @@ def predict(argv=None):
 
     else:
         predictions = trainer.predict(model, predict_loader)
-        out_data = dict(embeddings=predictions)
+        # out_data = dict(embeddings=predictions)
+        
+        #predictions = [torch.cat(l).numpy() for l in zip(*trainer.predict(model, predict_loader))]
+        label_classes = model.label_classes        
+        out_data = dict()
+        true_labels = predict_dataset.labels
+        
+        for key in label_classes: # This is currently working only for single label
+            
+            predictions = np.concatenate(predictions, axis=0)
+            out_data[key] = {
+                'output': predictions,
+                'labels': true_labels
+            }
     
     
     if not args.pred_only:
