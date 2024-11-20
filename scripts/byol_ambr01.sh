@@ -30,8 +30,6 @@ INPUT_DIR="$SCRATCH/tar_ball/segmented_square_96"
 #     --outdir /pscratch/sd/n/niranjan/output/optatune/opta_${task_name}/ \
 #     -n 95 \
 #     --stop_wandb \
-#     --time_weight 1e-3 \
-#     time \
 
 # Get the best checkpoint
 best_ckpt=$(ls /pscratch/sd/n/niranjan/output/optatune/opta_${task_name}/ | \
@@ -50,7 +48,6 @@ lmcontrol infer-byol \
     --checkpoint $best_ckpt_path \
     -o /pscratch/sd/n/niranjan/output/prediction_${task_name}.npz \
     -n 95 \
-    time \
     # -save_emb \
     # --save_misclassified /pscratch/sd/n/niranjan/output/optatune/ambr01_misclassify/misclassified_${task_name} \
     # --save_confusion /pscratch/sd/n/niranjan/output/optatune/ambr01_misclassify/

@@ -74,7 +74,7 @@ class BYOL(L.LightningModule):
         momentum = cosine_schedule(self.current_epoch, 10, 0.996, 1)
         update_momentum(self.backbone, self.backbone_momentum, m=momentum)
         update_momentum(self.projection_head, self.projection_head_momentum, m=momentum)
-        (x0, x1) = batch[0]
+        (x0, x1) = batch
         p0 = self.forward(x0)
         z0 = self.forward_momentum(x0)
         p1 = self.forward(x1)
@@ -84,7 +84,7 @@ class BYOL(L.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        (x0, x1) = batch[0]
+        (x0, x1) = batch
         p0 = self.forward(x0)
         z0 = self.forward_momentum(x0)
         p1 = self.forward(x1)
@@ -94,7 +94,7 @@ class BYOL(L.LightningModule):
         return loss
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
-        x = batch[0]
+        x = batch
         return self.backbone(x).flatten(start_dim=1)
 
     def configure_optimizers(self):
@@ -181,7 +181,6 @@ def _get_trainer(args, trial=None):
 
 def train(argv=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument('labels', type=str, nargs='+', choices=['time', 'feed', 'starting_media', 'conditions', 'sample'], help="the label to train with")
     parser.add_argument("--training", type=str, nargs='+', required=True, help="directories containing training data")
 
     grp = parser.add_mutually_exclusive_group()
@@ -228,10 +227,10 @@ def train(argv=None):
             logger = get_logger("critical")
 
         logger.info(f"Loading training data from: {len(split_files)} files")
-        train_dataset = LMDataset(split_files, transform=transform_train, logger=logger, return_labels=True, label_type=args.labels, n_samples=n, return_embeddings=args.return_embeddings, split='train', val_size=args.val_frac, seed=args.seed)
+        train_dataset = LMDataset(split_files, transform=transform_train, logger=logger, return_labels=False, n_samples=n, split='train', val_size=args.val_frac, seed=args.seed)
 
         logger.info(f"Loading validation data from: {len(split_files)} files")
-        val_dataset = LMDataset(split_files, transform=transform_val, logger=logger, return_labels=True, label_type=args.labels, n_samples=n, return_embeddings=args.return_embeddings, split='validate', val_size=args.val_frac, seed=args.seed)
+        val_dataset = LMDataset(split_files, transform=transform_val, logger=logger, return_labels=False, n_samples=n, split='validate', val_size=args.val_frac, seed=args.seed)
 
 
     elif args.validation:
@@ -244,10 +243,10 @@ def train(argv=None):
             logger = get_logger("critical")
 
         logger.info(f"Loading training data: {len(train_files)} files")
-        train_dataset = LMDataset(train_files, transform=transform_train, logger=logger, return_labels=True, label_type=args.labels, n_samples=n, return_embeddings=args.return_embeddings)
+        train_dataset = LMDataset(train_files, transform=transform_train, logger=logger, return_labels=False, n_samples=n)
 
         logger.info(f"Loading validation data: {len(val_files)} files")
-        val_dataset = LMDataset(val_files, transform=transform_val, logger=logger, return_labels=True, label_type=args.labels, n_samples=n, return_embeddings=args.return_embeddings)
+        val_dataset = LMDataset(val_files, transform=transform_val, logger=logger, return_labels=False, n_samples=n)
 
 
     else:
@@ -261,7 +260,6 @@ def train(argv=None):
 
     label_classes=train_dataset.label_classes
     
-    #model = LightningResNet(train_dataset.label_classes, lr=args.lr, step_size=args.step_size, gamma=args.gamma,block=args.block, planes=args.planes, layers=args.layers, return_embeddings=args.return_embeddings, time_weight=args.time_weight)
     model = BYOL(label_classes)
     trainer = _get_trainer(args)
 
@@ -271,7 +269,6 @@ def train(argv=None):
 def predict(argv=None):
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('labels', type=str, nargs='+', choices=['time', 'feed', 'starting_media', 'conditions', 'sample'], help="the label to predict with")
     parser.add_argument("--prediction", type=str, nargs='+', required=True, help="directories containing prediction data")
     parser.add_argument("-c", "--checkpoint", type=str, help="path to the model checkpoint file to use for inference")
     parser.add_argument("-o", "--output_npz", type=str, help="the path to save the embeddings to. Saved in NPZ format")
@@ -283,13 +280,13 @@ def predict(argv=None):
     args = parser.parse_args(argv)
 
     logger = get_logger('info')
-    transform = _get_transforms('float', 'norm', 'crop', 'rgb')   ## ## ## ##
+    transform = _get_transforms('float', 'norm', 'crop', 'rgb')   
     
     test_files = args.prediction
     n = args.n_samples
     
     logger.info(f"Loading inference data: {len(test_files)} files")
-    test_dataset = LMDataset(test_files, transform=transform, logger=logger, return_labels=True, label_type=args.labels, n_samples=n, return_embeddings=args.return_embeddings)
+    test_dataset = LMDataset(test_files, transform=transform, logger=logger, return_labels=False, n_samples=n)
 
     test_dl = DataLoader(test_dataset, batch_size=512, shuffle=False, drop_last=False, num_workers=3)
 
@@ -303,17 +300,10 @@ def predict(argv=None):
 
     out_data = dict(predictions=predictions)
 
-    # if not args.pred_only:
-    #     dset = test_dataset.dataset
-    #     out_data['images'] = np.asarray(torch.squeeze(dset.data))
-    #     for i, k in enumerate(dset.label_types):
-    #         out_data[k + "_classes"] = dset.label_classes[i]
-    #         out_data[k + "_labels"] = np.asarray(dset.labels[:, i])
-
     if not args.pred_only:
         dset = test_dataset
         out_data['images'] = np.asarray(torch.squeeze(dset.data))
-        out_data['metadata'] = {key: np.asarray(dset.metadata[key]) for key in dset.metadata}
+        #out_data['metadata'] = {key: np.asarray(dset.metadata[key]) for key in dset.metadata}
         
     np.savez(args.output_npz, **out_data)
 
