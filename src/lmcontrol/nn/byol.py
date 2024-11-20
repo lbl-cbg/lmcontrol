@@ -1,10 +1,13 @@
 import argparse
 import copy
 import glob
+import wandb
 
 import lightning as L
-from lightning.pytorch.loggers import CSVLogger
+from lightning.pytorch.loggers import WandbLogger, CSVLogger
 from lightning.pytorch.callbacks.early_stopping import EarlyStopping
+from lightning.pytorch.callbacks import ModelCheckpoint
+
 import numpy as np
 
 import torch
@@ -17,10 +20,12 @@ from lightly.models.modules import BYOLPredictionHead, BYOLProjectionHead
 from lightly.models.utils import deactivate_requires_grad, update_momentum
 from lightly.transforms.byol_transform import BYOLTransform
 from lightly.utils.scheduler import cosine_schedule
+from optuna.integration import PyTorchLightningPruningCallback
+from torchvision.models.resnet import BasicBlock, Bottleneck
 
 from ..utils import get_logger
-from .dataset import get_lightly_dataset, get_transforms as _get_transforms
-
+from .dataset import LMDataset, get_transforms as _get_transforms
+from lmcontrol.nn.resnet import ResNet
 
 class BYOL(L.LightningModule):
 
@@ -28,23 +33,18 @@ class BYOL(L.LightningModule):
     # from the paper. The settings are chosen such that the example can easily be
     # run on a small dataset with a single GPU.
 
-    val_metric = "validation_ncs"
-    train_metric = "train_ncs"
+    val_metric = "total_val_loss"
+    #train_metric = "train_ncs"
 
-    def __init__(self, model="resnet18"):
+    def __init__(self, label_classes, lr=0.01, step_size=2, gamma=0.1, planes=[8, 16, 32, 64],
+                 layers=[1, 1, 1, 1], block=BasicBlock, return_embeddings=False, time_weight=1e-3):
         super().__init__()
-        if model == "resnet18":
-            resnet = torchvision.models.resnet18()
-            n_features = 512
-        elif model == "resnet50":
-            resnet = torchvision.models.resnet50()
-            n_features = 2048
-        elif model == "convnext_tiny":
-            resnet = torchvision.models.convnext_tiny()
-            n_features = 768
-        else:
-            raise ValueError(f"Unrecognized model: '{model}'")
 
+        self.label_classes = label_classes 
+        
+        resnet = ResNet(block=block, layers=layers, planes=planes, num_outputs=0, return_embeddings=return_embeddings)
+
+        n_features = resnet.n_features
 
         self.backbone = nn.Sequential(*list(resnet.children())[:-1])
         self.projection_head = BYOLProjectionHead(n_features, 1024, 256)
@@ -80,7 +80,7 @@ class BYOL(L.LightningModule):
         p1 = self.forward(x1)
         z1 = self.forward_momentum(x1)
         loss = 0.5 * (self.criterion(p0, z1) + self.criterion(p1, z0))
-        self.log(self.train_metric, loss, batch_size=x0.size(0))
+        #self.log(self.train_metric, loss, batch_size=x0.size(0))
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -121,90 +121,179 @@ def get_transform(transform1=None, transform2=None):
     )
     return transform
 
+def get_block(block_type):
+    return {
+        'BasicBlock': BasicBlock,
+        'Bottleneck': Bottleneck
+    }[block_type]
+
+
+def get_planes(plane_cmd):
+    p = int(plane_cmd)
+    return [2**p, 2**(p+1), 2**(p+2), 2**(p+3)]
+
+
+def get_layers(layers_cmd):
+    l = int(layers_cmd)
+    layers = [1 if i < l else 0 for i in range(4)]
+    return layers
+
+
+def _get_trainer(args, trial=None):
+    accelerator = "gpu" if torch.cuda.is_available() else "cpu"
+
+    callbacks = []
+
+    targs = dict(max_epochs=args.epochs, devices=1, accelerator=accelerator, check_val_every_n_epoch=4, callbacks=callbacks)
+
+    # should we use r2 score and val_accuracy for measurement 
+    if args.checkpoint:
+        checkpoint_callback = ModelCheckpoint(
+            dirpath=args.checkpoint,
+            filename="checkpoint-{epoch:02d}-{total_val_loss:.4f}",
+            save_top_k=3,
+            monitor="total_val_loss",
+            mode="min"
+        )
+        callbacks.append(checkpoint_callback)
+
+    early_stopping_callback = EarlyStopping(
+        monitor="total_val_loss",  
+        patience=5,                
+        min_delta=0.001,         
+        mode="min"                 
+    )
+    callbacks.append(early_stopping_callback)
+
+
+    if trial is not None :   # if 'trial' is passed in, assume we are using Optuna to do HPO
+        targs['logger'] = CSVLogger(args.outdir, name=args.experiment)
+        if args.pruning:
+            callbacks.append(PyTorchLightningPruningCallback(trial, monitor="combined_metric"))
+
+    else:
+        if args.stop_wandb:
+            wandb.init(project="SX_HTY_Run1")
+            targs['logger'] = WandbLogger(project='your_project_name', log_model=True)
+
+    return L.Trainer(**targs)
+
 
 def train(argv=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument("experiment", type=str, help="the experiment name")
-    parser.add_argument("-T", "--training", nargs='+', type=str, help="the NPZs with cropped images to use for training")
-    parser.add_argument("-V", "--validation", nargs='+', type=str, help="the NPZs with cropped images to use for validation")
-    parser.add_argument("-o", "--outdir", type=str, help="the directory to save output to", default='.')
-    parser.add_argument("-c", "--checkpoint", type=str, help="checkpoint file to pick up from", default=None)
+    parser.add_argument('labels', type=str, nargs='+', choices=['time', 'feed', 'starting_media', 'conditions', 'sample'], help="the label to train with")
+    parser.add_argument("--training", type=str, nargs='+', required=True, help="directories containing training data")
+
+    grp = parser.add_mutually_exclusive_group()
+    grp.add_argument("--validation", type=str, nargs='+', help="directories containing validation data")
+    grp.add_argument("--val_frac", type=float, default=None, help="Part of data to use for training (between 0 and 1)")
+
+    parser.add_argument("--seed", type=int)
+    parser.add_argument("-c","--checkpoint", type=str, help="path to the model checkpoint file to use for inference")
     parser.add_argument("-e", "--epochs", type=int, help="the number of epochs to run for", default=10)
     parser.add_argument("-d", "--debug", action='store_true', help="run with a small dataset", default=False)
+    parser.add_argument("-o", "--outdir", type=str, help="the directory to save output to", default='.')
+    parser.add_argument("-n", "--n_samples", type=int, help="number of samples to use from each NPZ", default=None)
+    parser.add_argument("--early_stopping", action='store_true', help="enable early stopping", default=False)
+    parser.add_argument("-stop_wandb", "--stop_wandb", action='store_false', default=True, help="provide this flag to stop wandb")
+    parser.add_argument("--lr", type=float, help="learning rate", default=0.001)
+    parser.add_argument("--step_size", type=int, help="step size for learning rate scheduler", default=10)
+    parser.add_argument("--gamma", type=float, help="gamma for learning rate scheduler", default=0.1)
+    parser.add_argument("--batch_size", type=int, help="batch size for training and validation", default=32)
+    parser.add_argument("--block", type=get_block, choices=['BasicBlock', 'Bottleneck'], help="type of block to use in the model", default='Bottleneck')
+    parser.add_argument("--planes", type=get_planes, choices=['3', '4'], help="list of number of planes for each layer", default='4')
+    parser.add_argument("--layers", type=get_layers, choices=['1', '2', '3', '4'], help="list of number of layers in each stage", default='4')
+    parser.add_argument("-save_emb", "--return_embeddings", action='store_true', default=False, help="saves embeddings, used for plotly/dash")
+    parser.add_argument("--time_weight", type=float, help="loss function weight for time", default=0.001)
 
     args = parser.parse_args(argv)
 
     logger = get_logger('info')
 
-    train_files = args.training
-    val_files = args.validation
-
-    if args.debug:
-        num_workers = 0
-    else:
-        num_workers = 3
-
-    train_tfm = get_transform()
-    val_tfm = get_transform(
+    # transform_train = _get_transforms('float', 'norm','blur','rotate', 'crop','hflip', 'vflip', 'noise', 'rgb')
+    # transform_val = _get_transforms('float', 'norm','blur','rotate', 'crop','hflip', 'vflip', 'noise', 'rgb')
+    
+    transform_train = get_transform()
+    transform_val = get_transform(
             transform1=_get_transforms('float', 'norm', 'rotate', 'crop', 'hflip', 'vflip', 'rgb'),
             transform2=_get_transforms('float', 'norm', 'crop', 'rgb'),
-            )
-
-    logger.info(f"Loading training data: {len(train_files)} files")
-    train_dataset = get_lightly_dataset(train_files, transform=train_tfm, logger=logger)
-    logger.info(f"Loading validation data: {len(val_files)} files")
-    val_dataset = get_lightly_dataset(val_files, transform=val_tfm, logger=logger)
-
-    model = BYOL()
-
-    train_dl = DataLoader(
-        train_dataset,
-        batch_size=256,
-        shuffle=True,
-        drop_last=True,
-        num_workers=num_workers,
     )
 
-    val_dl = DataLoader(
-        val_dataset,
-        batch_size=256,
-        shuffle=False,
-        drop_last=True,
-        num_workers=num_workers,
-    )
+    if args.val_frac:
+        split_files = args.training
 
-    accelerator = "gpu" if torch.cuda.is_available() else "cpu"
+        n = args.n_samples
 
-    trainer = L.Trainer(max_epochs=args.epochs, devices=1, accelerator=accelerator,
-                        logger=CSVLogger(args.outdir, name=args.experiment),
-                        callbacks=[EarlyStopping(monitor=model.val_metric, min_delta=0.001, patience=3, mode="min")])
+        if logger is None:
+            logger = get_logger("critical")
 
-    trainer.fit(model=model, train_dataloaders=train_dl, val_dataloaders=val_dl)
+        logger.info(f"Loading training data from: {len(split_files)} files")
+        train_dataset = LMDataset(split_files, transform=transform_train, logger=logger, return_labels=True, label_type=args.labels, n_samples=n, return_embeddings=args.return_embeddings, split='train', val_size=args.val_frac, seed=args.seed)
+
+        logger.info(f"Loading validation data from: {len(split_files)} files")
+        val_dataset = LMDataset(split_files, transform=transform_val, logger=logger, return_labels=True, label_type=args.labels, n_samples=n, return_embeddings=args.return_embeddings, split='validate', val_size=args.val_frac, seed=args.seed)
+
+
+    elif args.validation:
+        train_files = args.training
+        val_files = args.validation
+
+        n = args.n_samples
+
+        if logger is None:
+            logger = get_logger("critical")
+
+        logger.info(f"Loading training data: {len(train_files)} files")
+        train_dataset = LMDataset(train_files, transform=transform_train, logger=logger, return_labels=True, label_type=args.labels, n_samples=n, return_embeddings=args.return_embeddings)
+
+        logger.info(f"Loading validation data: {len(val_files)} files")
+        val_dataset = LMDataset(val_files, transform=transform_val, logger=logger, return_labels=True, label_type=args.labels, n_samples=n, return_embeddings=args.return_embeddings)
+
+
+    else:
+        print("You must specify --validation or --val_frac", file=sys.stderr)
+        exit(1)
+
+    num_workers = 0 if args.debug else 4
+
+    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, drop_last=True, num_workers=num_workers)
+    val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, drop_last=True, num_workers=num_workers)
+
+    label_classes=train_dataset.label_classes
+    
+    #model = LightningResNet(train_dataset.label_classes, lr=args.lr, step_size=args.step_size, gamma=args.gamma,block=args.block, planes=args.planes, layers=args.layers, return_embeddings=args.return_embeddings, time_weight=args.time_weight)
+    model = BYOL(label_classes)
+    trainer = _get_trainer(args)
+
+
+    trainer.fit(model, train_loader, val_loader)
 
 def predict(argv=None):
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('labels', type=str, help="the label to predict with")
-    # add argument for passing in NPZ files for doing predictions on:DONE
+    parser.add_argument('labels', type=str, nargs='+', choices=['time', 'feed', 'starting_media', 'conditions', 'sample'], help="the label to predict with")
     parser.add_argument("--prediction", type=str, nargs='+', required=True, help="directories containing prediction data")
-    parser.add_argument("-o","--output_npz", type=str, help="the path to save the embeddings to. Saved in NPZ format")
+    parser.add_argument("-c", "--checkpoint", type=str, help="path to the model checkpoint file to use for inference")
+    parser.add_argument("-o", "--output_npz", type=str, help="the path to save the embeddings to. Saved in NPZ format")
     parser.add_argument("-d", "--debug", action='store_true', help="run with a small dataset", default=False)
-    parser.add_argument("-p", "--pred-only", action='store_true', default=False,
-                        help="only save predictions, otherwise save original image data and labels in output_npz")
+    parser.add_argument("-p", "--pred-only", action='store_true', default=False, help="only save predictions, otherwise save original image data and labels in output_npz")
+    parser.add_argument("-n", "--n_samples", type=int, help="number of samples to use from each class", default=None)
+    parser.add_argument("-save_emb", "--return_embeddings", action='store_true', default=False, help="provide this if you don't want classifier, helpful in embeddings stuff")
 
     args = parser.parse_args(argv)
 
     logger = get_logger('info')
-
-    test_files = args.input_npz
-
-    transform = _get_transforms('float', 'norm', 'crop', 'rgb')
-    logger.info(f"Loading training data: {len(test_files)} files")
-    test_dataset = get_lightly_dataset(test_files, transform=transform, logger=logger, return_labels=True)
+    transform = _get_transforms('float', 'norm', 'crop', 'rgb')   ## ## ## ##
+    
+    test_files = args.prediction
+    n = args.n_samples
+    
+    logger.info(f"Loading inference data: {len(test_files)} files")
+    test_dataset = LMDataset(test_files, transform=transform, logger=logger, return_labels=True, label_type=args.labels, n_samples=n, return_embeddings=args.return_embeddings)
 
     test_dl = DataLoader(test_dataset, batch_size=512, shuffle=False, drop_last=False, num_workers=3)
 
-    model = BYOL.load_from_checkpoint(args.checkpoint)
+    model = BYOL.load_from_checkpoint(args.checkpoint, label_classes=test_dataset.label_classes, return_embeddings=args.return_embeddings)
     accelerator = "gpu" if torch.cuda.is_available() else "cpu"
     trainer = L.Trainer(devices=1, accelerator=accelerator)
 
@@ -212,15 +301,20 @@ def predict(argv=None):
     predictions = trainer.predict(model, test_dl)
     predictions = torch.cat(predictions).numpy()
 
-    out_data = dict(predictions=predictions, true_labels = true_labels)
+    out_data = dict(predictions=predictions)
+
+    # if not args.pred_only:
+    #     dset = test_dataset.dataset
+    #     out_data['images'] = np.asarray(torch.squeeze(dset.data))
+    #     for i, k in enumerate(dset.label_types):
+    #         out_data[k + "_classes"] = dset.label_classes[i]
+    #         out_data[k + "_labels"] = np.asarray(dset.labels[:, i])
 
     if not args.pred_only:
-        dset = test_dataset.dataset
+        dset = test_dataset
         out_data['images'] = np.asarray(torch.squeeze(dset.data))
-        for i, k in enumerate(dset.label_types):
-            out_data[k + "_classes"] = dset.label_classes[i]
-            out_data[k + "_labels"] = np.asarray(dset.labels[:, i])
-
+        out_data['metadata'] = {key: np.asarray(dset.metadata[key]) for key in dset.metadata}
+        
     np.savez(args.output_npz, **out_data)
 
 

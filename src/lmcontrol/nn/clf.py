@@ -306,7 +306,6 @@ def _get_trainer(args, trial=None):
 
     targs = dict(max_epochs=args.epochs, devices=1, accelerator=accelerator, check_val_every_n_epoch=4, callbacks=callbacks)
 
-    # should we use r2 score and val_accuracy for measurement 
     if args.checkpoint:
         checkpoint_callback = ModelCheckpoint(
             dirpath=args.checkpoint,
@@ -317,6 +316,8 @@ def _get_trainer(args, trial=None):
         )
         callbacks.append(checkpoint_callback)
 
+        
+    # add early stopping to this (refer BYOL)
 
     if trial is not None :   # if 'trial' is passed in, assume we are using Optuna to do HPO
         targs['logger'] = CSVLogger(args.outdir, name=args.experiment)
