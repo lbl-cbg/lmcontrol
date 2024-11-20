@@ -22,12 +22,12 @@ def load_npzs(npzs, logger, n_samples=None, label_type=None):
         
         total_samples = len(npz['masks'])
         indices = None
-        if n_samples is not None and total_samples > n_samples:    # take a subset
+        if n_samples is not None and total_samples > n_samples:   
             indices = np.random.permutation(total_samples)[:n_samples]
             masks.append(npz['masks'][indices])
             images.append(npz['images'][indices])
             paths.append(npz['paths'][indices])
-        else:                                                      # dont take a subset
+        else:                                                     
             if n_samples > total_samples:
                 warnings.warn(f"{n_samples} is more samples than found in {npz_path}. Will use all samples")
             n_samples = total_samples
@@ -57,11 +57,14 @@ def load_npzs(npzs, logger, n_samples=None, label_type=None):
     metadata = {k: np.array(v) for k, v in metadata.items()}
 
     target_len = len(masks)
-    for k in metadata.keys():
-        if len(metadata[k]) != target_len:
-            logger.critical(f"Metadata '{k}' not found in all NPZ files")
-            raise ValueError(f"Metadata '{k}' length mismatch: expected {target_len}, got {len(metadata[k])}")
-    return masks, images, paths, metadata
+    consistent_metadata = {}
+    for k, v in metadata.items(): 
+        if len(v) == target_len:
+            consistent_metadata[k] = v
+        else:
+            logger.warning(f"Skipping metadata '{k}' due to length mismatch: expected {target_len}, got {len(v)}")
+
+    return masks, images, paths, consistent_metadata
 
 def encode_labels(labels, mode, classes=None, return_classes=False):
     """This is a wrapper for sklearn.preprocessing.LabelEncoder"""

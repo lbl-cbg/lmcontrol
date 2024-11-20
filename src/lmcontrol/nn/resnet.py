@@ -69,9 +69,10 @@ class ResNet(nn.Module):
 
 
         idx = max(i for i in range(len(layers)) if layers[i] != 0)
-        n_features = planes[idx] * expansion[idx]
+        self.n_features = planes[idx] * expansion[idx]
 
-        self.fc = nn.Linear(n_features, num_outputs)
+        if not self.return_embeddings:
+            self.fc = nn.Linear(self.n_features, num_outputs)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -150,10 +151,10 @@ class ResNet(nn.Module):
 
         x = self.avgpool(x)
         x = torch.flatten(x, 1)
-
+        
         if not self.return_embeddings:
             x = self.fc(x)
-
+        
         return x
 
     def forward(self, x: Tensor) -> Tensor:

@@ -6,17 +6,17 @@
 #SBATCH --gpus-per-task=1
 #SBATCH -n 1
 #SBATCH --time=1:30:00
-#SBATCH --array=0-9
+#SBATCH --array=0-10%4
 #SBATCH -e /pscratch/sd/n/niranjan/error/clf_error_rep/optuna_multilabels/optatune.%A_%a 
 #SBATCH -o /pscratch/sd/n/niranjan/error/clf_error_rep/optuna_multilabels/optatune.%A_%a
 #SBATCH -J optuna_multilabels
 
 #python -c "import optuna; optuna.delete_study(study_name='study', storage='sqlite:////pscratch/sd/n/niranjan/output/optatune/multilabels_trials_11_12_01_00/study.db')"
 
-# task_name="11_12_01_${SLURM_ARRAY_TASK_ID}"
+task_name="11_12_01_02_${SLURM_ARRAY_TASK_ID}"
 
-# echo "Running task with ID: ${SLURM_ARRAY_TASK_ID}"
-task_name="test_multilabels_11_12_01_00"
+echo "Running task with ID: ${SLURM_ARRAY_TASK_ID}"
+# task_name="test_multilabels_11_12_01_00"
 
 lmcontrol tune \
     -t 1 \
