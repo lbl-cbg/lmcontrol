@@ -145,6 +145,10 @@ def _get_trainer(args, trial=None):
     callbacks = []
 
     targs = dict(max_epochs=args.epochs, devices=1, accelerator=accelerator, check_val_every_n_epoch=4, callbacks=callbacks)
+    
+    if args.devices >1:            # if loop meaning we are in for BYOL unsupervised learning
+        targs['strategy'] = "ddp"
+        targs['accelerator'] = "gpu"
 
     # should we use r2 score and val_accuracy for measurement 
     if args.checkpoint:
@@ -204,6 +208,9 @@ def train(argv=None):
     parser.add_argument("--layers", type=get_layers, choices=['1', '2', '3', '4'], help="list of number of layers in each stage", default='4')
     parser.add_argument("-save_emb", "--return_embeddings", action='store_true', default=False, help="saves embeddings, used for plotly/dash")
     parser.add_argument("--time_weight", type=float, help="loss function weight for time", default=0.001)
+    parser.add_argument("--accelerator", type=str, help="type of accelerator for trainer", default="gpu")
+    parser.add_argument("--strategy", type=str, help="type of strategy for trainer", default="auto")
+    parser.add_argument("--devices", type=int, help="number of devices for trainer", default=1)
 
     args = parser.parse_args(argv)
 
@@ -303,7 +310,9 @@ def predict(argv=None):
     if not args.pred_only:
         dset = test_dataset
         out_data['images'] = np.asarray(torch.squeeze(dset.data))
-        #out_data['metadata'] = {key: np.asarray(dset.metadata[key]) for key in dset.metadata}
+        out_data['metadata'] = {key: np.asarray(dset.metadata[key]) for key in dset.metadata}
+    
+    logger.info("Saving output")
         
     np.savez(args.output_npz, **out_data)
 
