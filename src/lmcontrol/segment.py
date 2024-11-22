@@ -196,7 +196,18 @@ def add_metadata(argv=None):
     data.update(args.metadata)
     np.savez(args.npz, **data)
 
+def crop_center(image, crop_size):
+    """
+    Crop the center of the given image to the specified size.
+    """
+    h, w = image.shape
+    crop_h, crop_w = crop_size
+    start_h = max(0, (h - crop_h) // 2)
+    start_w = max(0, (w - crop_w) // 2)
+    end_h = start_h + crop_h
+    end_w = start_w + crop_w
 
+    return image[start_h:end_h, start_w:end_w]
 
 def main(argv=None):
     """
@@ -210,7 +221,7 @@ def main(argv=None):
             return (64, 32)
         else:
             try:
-                x, y = string.split(',')
+                x, y = string.split(',')  ###
                 x, y = int(x), int(y)
                 return (x, y)
             except:
@@ -266,15 +277,15 @@ def main(argv=None):
     for tif in tqdm(image_paths):
         image = sio.imread(tif)[:, :, 0]
         try:
-            #check for bad images caused by flow-cytometer and/or imaging errors
+            # Check for bad images caused by flow-cytometer and/or imaging errors
             if image.std() > 15:
                 raise UnsegmentableError("StdDev of pixels is quite high, this is probably a bad image")
             mask = outlier_cluster(image)
             segi = trim_box(mask, image)
-            orig_seg_images.append(segi) # save segmented original image
+            orig_seg_images.append(segi)  # Save segmented original image
             paths.append(tif)
 
-            # rotate image if cell is oriented horizontally
+            # Rotate image if cell is oriented horizontally
             # and crop to standard size
             if (segi.shape[1] / segi.shape[0]) >= 1.4:
                 image = ndi.rotate(image, -90)
@@ -285,16 +296,14 @@ def main(argv=None):
             seg_images.append(segi)
             seg_masks.append(segm)
         except UnsegmentableError:
-            if args.save_unseg:
-                target = os.path.join(unseg_dir, os.path.basename(tif))
-                if not dir_exists:
-                    os.makedirs(os.path.dirname(target), exist_ok=True)
-                    dir_exists = True
-                sio.imsave(target, image)
             n_unseg += 1
+            center_cropped_image = crop_center(image, args.crop)
+            seg_images.append(center_cropped_image)
+            seg_masks.append(np.zeros_like(center_cropped_image))  
+            paths.append(tif)  
             continue
 
-    logger.info(f"Done segmenting images. {n_unseg} ({100 * n_unseg / len(image_paths):.1f}%) images were unsegmentable")
+        logger.info(f"Done segmenting images. {n_unseg} ({100 * n_unseg / len(image_paths):.1f}%) images were unsegmentable")
 
     seg_images = np.array(seg_images)
     seg_masks = np.array(seg_masks)
