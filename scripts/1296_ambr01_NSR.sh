@@ -12,12 +12,12 @@
 #SBATCH -J opta_10_18_00_00  # Job name
 
 # Assign custom name (SLURM_ARRAY_TASK_ID is replaced with the custom name)
-task_name="10_22_00_00"
+task_name="multilabels_5e-4_11_13_00_00"
 
 INPUT_DIR="/pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR"
 
 # Run the script with the task_name
-lmcontrol opta-clf-train \
+lmcontrol sup-train \
     --training \
     $INPUT_DIR/S1/S1_HT2/all_processed.npz \
     $INPUT_DIR/S1/S1_HT7/all_processed.npz \
@@ -57,11 +57,12 @@ lmcontrol opta-clf-train \
     $INPUT_DIR/S28/S28_HT8/all_processed.npz \
     $INPUT_DIR/S28/S28_HT11/all_processed.npz \
     --checkpoint /pscratch/sd/n/niranjan/output/optatune/opta_${task_name}/ \
-    --epochs 5 \
+    --epochs 25 \
     --outdir /pscratch/sd/n/niranjan/output/optatune/opta_${task_name}/ \
-    -n 95 \
+    -n 9500 \
     testing0 \
-    conditions
+    time \
+    conditions \
 
 # Get the best checkpoint
 best_ckpt=$(ls /pscratch/sd/n/niranjan/output/optatune/opta_${task_name}/ | \
@@ -72,7 +73,7 @@ best_ckpt=$(ls /pscratch/sd/n/niranjan/output/optatune/opta_${task_name}/ | \
 best_ckpt_path="/pscratch/sd/n/niranjan/output/optatune/opta_${task_name}/$best_ckpt"
 
 # Run the prediction step using the best checkpoint
-lmcontrol opta-clf-predict \
+lmcontrol sup-predict \
     --prediction \
     $INPUT_DIR/S1/S1_HT5/all_processed.npz \
     $INPUT_DIR/S1/S1_HT9/all_processed.npz \
@@ -94,7 +95,8 @@ lmcontrol opta-clf-predict \
     $INPUT_DIR/S28/S28_HT12/all_processed.npz \
     --checkpoint $best_ckpt_path \
     -o /pscratch/sd/n/niranjan/output/prediction_${task_name}.npz \
-    -n 95 \
+    -n 9500 \
+    time \
     conditions \
     # -save_emb \
     # --save_misclassified /pscratch/sd/n/niranjan/output/optatune/ambr01_NSR_misclassify/misclassified_${task_name} \

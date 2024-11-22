@@ -150,10 +150,10 @@ class ResNet(nn.Module):
 
         x = self.avgpool(x)
         x = torch.flatten(x, 1)
-
+        
         if not self.return_embeddings:
             x = self.fc(x)
-
+        
         return x
 
     def forward(self, x: Tensor) -> Tensor:
