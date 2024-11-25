@@ -144,12 +144,11 @@ def _get_trainer(args, trial=None):
 
     callbacks = []
 
-    targs = dict(max_epochs=args.epochs, devices=1, accelerator=accelerator, check_val_every_n_epoch=4, callbacks=callbacks)
-    
-    if args.devices >1:            # if loop meaning we are in for BYOL unsupervised learning
-        targs['strategy'] = "ddp"
-        targs['accelerator'] = "gpu"
+    targs = dict(max_epochs=args.epochs, devices=args.devices, accelerator="gpu" if args.devices > 0 else "cpu", check_val_every_n_epoch=4, callbacks=callbacks)
 
+    if args.devices > 1:  # If using multiple GPUs, use Distributed Data Parallel (DDP)
+        targs['strategy'] = "ddp"
+        
     # should we use r2 score and val_accuracy for measurement 
     if args.checkpoint:
         checkpoint_callback = ModelCheckpoint(

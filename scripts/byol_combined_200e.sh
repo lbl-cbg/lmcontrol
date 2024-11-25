@@ -1,12 +1,12 @@
 #!/bin/bash
 #SBATCH -A m3513
 #SBATCH -C gpu
-#SBATCH -q regular
+#SBATCH -q debug
 #SBATCH -c 32
 #SBATCH --gpus-per-task=1
 #SBATCH -N 1
 #SBATCH --ntasks-per-node=4
-#SBATCH --time=24:00:00
+#SBATCH --time=29:00
 #SBATCH --array=0  # Only one job in the array (since we're only using one name)
 #SBATCH -e /pscratch/sd/n/niranjan/error/clf_error_rep/opta_1296_combis/optatune.%A_byol_combined_200e.err
 #SBATCH -o /pscratch/sd/n/niranjan/error/clf_error_rep/opta_1296_combis/optatune.%A_byol_combined_200e.out
@@ -15,7 +15,7 @@
 export SLURM_CPU_BIND="cores"
 
 # Assign custom name (SLURM_ARRAY_TASK_ID is replaced with the custom name)
-task_name="byol_combined_200e"
+task_name="byol_combined_200e_version1"
 INPUT_DIR="$SCRATCH/tar_ball/segmented_square_96"
 INPUT_DIR1="$SCRATCH/tar_ball/ambr_03/"
 INPUT_DIR2="/pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR"
@@ -155,6 +155,9 @@ srun lmcontrol train-byol \
     --epochs 200 \
     --outdir /pscratch/sd/n/niranjan/output/optatune/opta_${task_name}/ \
     -n 2500 \
+    --accelerator "gpu" \
+    --strategy "ddp" \
+    --devices 4 \
 
 # Get the best checkpoint
 best_ckpt=$(ls /pscratch/sd/n/niranjan/output/optatune/opta_${task_name}/ | \
@@ -296,9 +299,6 @@ lmcontrol infer-byol \
     --checkpoint $best_ckpt_path \
     -o /pscratch/sd/n/niranjan/output/prediction_${task_name}.npz \
     -n 2500 \
-    --accelerator "gpu" \
-    --strategy "ddp" \
-    --devices 4 \
     # -save_emb \
     # --save_misclassified /pscratch/sd/n/niranjan/output/optatune/ambr01_misclassify/misclassified_${task_name} \
     # --save_confusion /pscratch/sd/n/niranjan/output/optatune/ambr01_misclassify/

@@ -1,4 +1,5 @@
 import argparse
+import cv2
 import glob
 import os
 
@@ -196,17 +197,45 @@ def add_metadata(argv=None):
     data.update(args.metadata)
     np.savez(args.npz, **data)
 
-def crop_center(image, crop_size):
+
+def crop_center(image, crop_size, pad=True):
     """
     Crop the center of the given image to the specified size.
+    If the image is smaller than the desired size, it will be padded with zeros.
+    
+    Args:
+        image (array): The image to crop.
+        crop_size (tuple): The target size (height, width) to crop the image to.
+        pad (bool): If True, pad the image with zeros if it's smaller than the crop_size.
+    
+    Returns:
+        np.array: The cropped (and possibly padded) image.
     """
     h, w = image.shape
     crop_h, crop_w = crop_size
+    
     start_h = max(0, (h - crop_h) // 2)
     start_w = max(0, (w - crop_w) // 2)
     end_h = start_h + crop_h
     end_w = start_w + crop_w
+    
+    if pad:
+        padding_h = max(0, crop_h - h)
+        padding_w = max(0, crop_w - w)
+        
+        padded_image = np.pad(image, 
+                              ((padding_h // 2, padding_h - padding_h // 2), 
+                               (padding_w // 2, padding_w - padding_w // 2)),
+                              mode='constant', constant_values=0)
+        
+        h, w = padded_image.shape
+        start_h = (h - crop_h) // 2
+        start_w = (w - crop_w) // 2
+        end_h = start_h + crop_h
+        end_w = start_w + crop_w
 
+        return padded_image[start_h:end_h, start_w:end_w]
+    
     return image[start_h:end_h, start_w:end_w]
 
 def main(argv=None):
@@ -297,7 +326,8 @@ def main(argv=None):
             seg_masks.append(segm)
         except UnsegmentableError:
             n_unseg += 1
-            center_cropped_image = crop_center(image, args.crop)
+            center_cropped_image = crop_center(image, crop_size=args.crop, pad=args.pad)
+            
             seg_images.append(center_cropped_image)
             seg_masks.append(np.zeros_like(center_cropped_image))  
             paths.append(tif)  
@@ -305,6 +335,8 @@ def main(argv=None):
 
         logger.info(f"Done segmenting images. {n_unseg} ({100 * n_unseg / len(image_paths):.1f}%) images were unsegmentable")
 
+    breakpoint()
+    # [(i, img.shape) for i, img in enumerate(seg_images) if img.shape != (96, 96)]
     seg_images = np.array(seg_images)
     seg_masks = np.array(seg_masks)
     paths = np.array(paths)

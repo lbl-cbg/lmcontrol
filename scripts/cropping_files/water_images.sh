@@ -8,7 +8,8 @@ lmcontrol crop -n -u -c 96,96 -m "campaign=Images_from_water,ht=7,time=None,samp
 lmcontrol crop -n -u -c 96,96 -m "campaign=Images_from_water,ht=8,time=None,sample=water,feed=None" /pscratch/sd/n/niranjan/tar_ball/Images_from_water/Water_8/ /pscratch/sd/n/niranjan/tar_ball/Images_from_water/Water_8/
 lmcontrol crop -n -u -c 96,96 -m "campaign=Images_from_water,ht=9,time=None,sample=water,feed=None" /pscratch/sd/n/niranjan/tar_ball/Images_from_water/Water_9/ /pscratch/sd/n/niranjan/tar_ball/Images_from_water/Water_9/
 lmcontrol crop -n -u -c 96,96 -m "campaign=Images_from_water,ht=10,time=None,sample=water,feed=None" /pscratch/sd/n/niranjan/tar_ball/Images_from_water/Water_10/ /pscratch/sd/n/niranjan/tar_ball/Images_from_water/Water_10/
-lmcontrol crop -n -u -c 96,96 -m "campaign=Images_from_water,ht=11,time=None,sample=water,feed=None" /pscratch/sd/n/niranjan/tar_ball/Images_from_water/Water_11/ /pscratch/sd/n/niranjan/tar_ball/Images_from_water/Water_11/
+lmcontrol crop -n -u -p -c 96,96 -m "campaign=Images_from_water,ht=11,time=None,sample=water,feed=None" /pscratch/sd/n/niranjan/tar_ball/Images_from_water/Water_11/ /pscratch/sd/n/niranjan/tar_ball/Images_from_water/Water_11/
 lmcontrol crop -n -u -c 96,96 -m "campaign=Images_from_water,ht=12,time=None,sample=water,feed=None" /pscratch/sd/n/niranjan/tar_ball/Images_from_water/Water_12/ /pscratch/sd/n/niranjan/tar_ball/Images_from_water/Water_12/
 
-## NOTE: error with file 11
+
+## NOTE: use -p if error occurs
