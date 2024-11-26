@@ -2,6 +2,7 @@ import argparse
 import io
 import base64
 import pickle
+import os
 
 from dash import Dash, dcc, html, Input, Output, no_update, callback, State
 import plotly.graph_objects as go
@@ -10,12 +11,9 @@ from PIL import Image
 
 import numpy as np
 import pandas as pd
-import seaborn as sns
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 
-# Contains 100 images for each digit from MNIST
-mnist_path = 'datasets/mini-mnist-1000.pickle'
 
 # Helper functions
 def np_image_to_base64(im_matrix):
@@ -26,30 +24,83 @@ def np_image_to_base64(im_matrix):
     im_url = "data:image/jpeg;base64, " + encoded_image
     return im_url
 
-def load_mini_mnist():
-    with open(mnist_path, 'rb') as f:
-        data = pickle.load(f)
-    return data
+current_selected_label = None
 
+df = classes = dd_options = all_labels = scatter = fig_vars = None
 
-def load_data(path):
-    npz = np.load(path)
-    labels = dict()
+def load_data(path, subsample=None, stratify_label=None, **addl_labels):
+    global df
+    global classes
+    global dd_options
+    global all_labels
+    global scatter
+    global fig_vars
+
+    npz = np.load(path, mmap_mode='r')
+    all_labels = dict()
     for k in npz.keys():
         if '_labels' in k:
             label = k[:-7]
-            labels[label] = {'labels': npz[label+'_labels'], 'classes': npz[label+'_classes']}
-    return npz['images'], npz['embedding'], npz['residuals'], npz['predicted_values'], labels
+            all_labels[label] = {'labels': npz[label+'_labels'], 'classes': npz[label+'_classes']}
+    images, emb = npz['images'], npz['embedding']
+
+    for k in addl_labels:
+        all_labels[k] = dict()
+        enc = LabelEncoder()
+        all_labels[k]['labels'] = enc.fit_transform(addl_labels[k])
+        all_labels[k]['classes'] = list(map(str, enc.classes_))
 
 
-def prob(string):  ##???
-    ret = float(string)
-    if ret > 1.0 or ret < 0.0:
-        raise argparse.ArgumentTypeError()
+    idx = np.arange(len(images))
+    # Subsample data
+    if subsample is not None and (subsample < 1.0 and subsample > 0.0):
+        if not isinstance(subsample, float) or not (subsample > 0.0 and subsample < 1.0):
+            raise ValueError("subsample must be a float between (0.0, 1.0)")
+        stratify = all_labels[stratify_label]['labels'] if stratify_label is not None else None
+        idx, _ = train_test_split(np.arange(len(images)), train_size=subsample, stratify=stratify)
+        images = images[idx]
+        emb = emb[idx]
+        for k in all_labels:
+            all_labels[k]['labels'] = all_labels[k]['labels'][idx]
 
-current_selected_label = None
+    encoded_images = [np_image_to_base64(img) for img in images]
 
-def build_app(npz, subsample=None, stratify_label=None, **addl_labels):
+    # Compute display label
+    display_text = list()
+    for i in range(len(emb)):
+        tmp = list()
+        for k in all_labels:
+            c = all_labels[k]['classes'][all_labels[k]['labels'][i]]
+            tmp.append(f"{k}: {c}")
+        display_text.append(f"idx: {idx[i]}\n" + " | ".join(tmp))
+
+
+    df_data = dict(x=emb[:, 0], y=emb[:, 1])
+    if emb.shape[1]== 3:
+        df_data['z'] = emb[:, 2]
+
+    fig_vars = list(df_data)  # use this so we know what kwargs to pass into our scatter graph object
+    df_data['images'] = encoded_images
+    df_data['text'] = display_text
+    for k in all_labels:
+        df_data[k] = all_labels[k]['labels']
+    df = pd.DataFrame(df_data)
+    classes = {k: df[k].unique() for k in all_labels}
+
+    dd_options = [{'label': k, 'value': k} for k in all_labels]
+
+    if 'z' in df:
+        scatter = go.Scatter3d
+        fig_vars = ['x', 'y', 'z']
+    else:
+        scatter = go.Scatter
+        fig_vars = ['x', 'y']
+
+
+def list_npz_files(directory):
+    return [{'label': f, 'value': f} for f in os.listdir(directory) if f.endswith('.npz')]
+
+def build_app(directory, subsample=1.0, stratify_label=None, **addl_labels):
     """Build a Dash app for interactive viewing of data
 
     Args:
@@ -65,84 +116,7 @@ def build_app(npz, subsample=None, stratify_label=None, **addl_labels):
         app (dash.Dash)         : a Dash application
     """
 
-    images, emb, res, predicted_values, all_labels = load_data(npz)
-
-    for k in addl_labels:
-        all_labels[k] = dict()
-        enc = LabelEncoder()  
-        all_labels[k]['labels'] = enc.fit_transform(addl_labels[k])
-        all_labels[k]['classes'] = list(map(str, enc.classes_))
-
-
-    idx = np.arange(len(images))
-    # Subsample data
-    if subsample is not None:
-        if not isinstance(subsample, float) or not (subsample > 0.0 and subsample < 1.0):
-            raise ValueError("subsample must be a float between (0.0, 1.0)")
-        stratify = all_labels[stratify_label]['labels'] if stratify_label is not None else None
-        idx, _ = train_test_split(np.arange(len(images)), train_size=subsample, stratify=stratify)
-        images = images[idx]
-        emb = emb[idx]
-        for k in all_labels:
-            all_labels[k]['labels'] = all_labels[k]['labels'][idx]
-
-    encoded_images = [np_image_to_base64(img) for img in images]
-
-    # Compute display label
-    # display_text = list()
-    # for i in range(len(emb)):
-    #     tmp = list()
-    #     for k in all_labels:
-    #         c = all_labels[k]['classes'][all_labels[k]['labels'][i]]
-    #         tmp.append(f"{k}: {c}")
-    #     display_text.append(f"idx: {idx[i]}\n" + " | ".join(tmp))
-
-    display_text = list()
-    for i in range(len(emb)):
-        tmp = list()
-        for k in all_labels:
-            # Show the original label
-            original_label = all_labels[k]['classes'][all_labels[k]['labels'][i]]
-            tmp.append(f"{k}: {original_label}")
-            
-            # Optionally, show the predicted value as well, if you want both original and predicted labels
-            predicted_label = predicted_values[i]  # Assuming predicted_values holds the predicted labels
-            tmp.append(f"Predicted: {predicted_label}")
-        
-        # Combine index, original labels, and predicted label into one string for each point
-        display_text.append(f"idx: {idx[i]}\n" + " | ".join(tmp))
-
-
-    scatter = go.Scatter
-    df_data = dict(x=emb[:, 0], y=emb[:, 1])
-    if emb.shape[1]== 3:
-        df_data['z'] = emb[:, 2]
-        scatter = go.Scatter3d
-
-    fig_vars = list(df_data)  # use this so we know what kwargs to pass into our scatter graph object
-    df_data['images'] = encoded_images
-    df_data['text'] = display_text
-    for k in all_labels:
-        df_data[k] = all_labels[k]['labels']
-    df = pd.DataFrame(df_data)
-    classes = {k: df[k].unique() for k in all_labels}
-
-    dd_options = [{'label': k, 'value': k} for k in all_labels]
-
-    # Set up our Dash application
-    app = Dash("LMControl Viz")
-    app.layout = html.Div(
-        className="container",
-        children=[
-            dcc.Dropdown(
-                id='label-dropdown',
-                options=dd_options,
-                value='ht'
-            ),
-            dcc.Graph(id="scatter-plot", clear_on_unhover=True),
-            dcc.Tooltip(id="scatter-tooltip", direction='bottom'),
-        ],
-    )
+    npz_files = list_npz_files(directory)
 
     # Make a function of updating the hover
     @callback(
@@ -183,6 +157,70 @@ def build_app(npz, subsample=None, stratify_label=None, **addl_labels):
 
         return True, bbox, children
 
+    # Set up our Dash application
+    app = Dash("LMControl Viz")
+    app.layout = html.Div(
+        className="container",
+        children=[
+            dcc.Interval(
+                id='interval-component',
+                interval=5*1000,  # Refresh every 60 seconds
+                n_intervals=0
+            ),
+            dcc.Dropdown(
+                id='npz-dropdown',
+                options=npz_files,
+                placeholder='Select a dataset',
+            ),
+            html.Div([
+                html.Label('Subsample fraction'),
+                dcc.Input(
+                    id='subsample-input',
+                    type='number',
+                    min=0.0,
+                    max=1.0,
+                    value=subsample,
+                ),
+                html.Button('Load data', id='update-button', n_clicks=0),
+            ]),
+            dcc.Loading(
+                id='loading-label-dropdown',
+                type='default',
+                children=[
+                    dcc.Dropdown(
+                        id='label-dropdown',
+                        placeholder='Select a label to color points with',
+                        value='ht',
+                    ),
+                ],
+            ),
+            dcc.Graph(id="scatter-plot", clear_on_unhover=True),
+            dcc.Tooltip(id="scatter-tooltip", direction='bottom'),
+        ],
+    )
+    @app.callback(
+        Output('npz-dropdown', 'options'),
+        Input('interval-component', 'n_intervals')
+    )
+    def refresh_npz_list(n_intervals):
+        # List NPZ files in the directory
+        return list_npz_files(directory)
+
+    @app.callback(
+        Output('label-dropdown', 'options'),
+        Output('label-dropdown', 'value'),
+        [Input('update-button', 'n_clicks')],
+        [State('npz-dropdown', 'value'), State('subsample-input', 'value')],
+    )
+    def update_viz_data(n_clicks, selected_file, subsample):
+        if selected_file is None:
+            return [], None
+        selected_file = os.path.join(directory, selected_file)
+        load_data(selected_file, subsample=subsample, stratify_label=stratify_label)
+        return dd_options, 'ht'
+
+
+
     @app.callback(
         Output('scatter-plot', 'figure'),
         [Input('label-dropdown', 'value')],
@@ -191,10 +229,12 @@ def build_app(npz, subsample=None, stratify_label=None, **addl_labels):
     def update_scatter_plot(selected_label, relayout_data):
         """Create Figure with scatter plot"""
 
+        if selected_label is None:
+            return go.Figure()
+
         global current_selected_label
         current_selected_label = selected_label
 
-        selected_label = time
 
         fig = go.Figure()
         for cls in classes[selected_label]:
@@ -232,6 +272,7 @@ def build_app(npz, subsample=None, stratify_label=None, **addl_labels):
 
     return app
 
+
 def main(argv=None):
 
     parser = argparse.ArgumentParser()
@@ -243,9 +284,10 @@ def main(argv=None):
 
     args = parser.parse_args(argv)
 
-    app = build_app(args.npz, subsample=args.subsample, stratify_label=args.label)
+    #app = build_app(args.npz, subsample=args.subsample, stratify_label=args.label)
+    app = build_app(args.npz, subsample=args.subsample)
 
-    app.run(debug=not args.prod, port=args.port)
+    app.run(debug=not args.prod, host='0.0.0.0', port=args.port)
 
 
 if __name__ == "__main__":
