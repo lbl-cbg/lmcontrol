@@ -38,28 +38,26 @@ def load_data(path, subsample=None, stratify_label=None, **addl_labels):
 
     npz = np.load(path, mmap_mode='r', allow_pickle=True)
     all_labels = dict()
-    
+
     if 'metadata' in npz:
-        
-        metadata = npz['metadata'].item()  
+
+        metadata = npz['metadata'].item()
 
         for key in metadata.keys():
             enc = LabelEncoder()
-            labels_key = f"{key}_labels"
-            classes_key = f"{key}_classes"
-            
+
             all_labels[key] = {
                 'labels': enc.fit_transform(metadata[key]),
                 'classes': list(map(str, enc.classes_))
-        }  
+        }
     else:
-        
+
         for k in npz.keys():
             if '_labels' in k:
                 label = k[:-7]
                 all_labels[label] = {'labels': npz[label+'_labels'], 'classes': npz[label+'_classes']}
-                
-            
+
+
     images, emb = npz['images'], npz['embedding']
 
     for k in addl_labels:
@@ -253,7 +251,7 @@ def build_app(directory, subsample=1.0, stratify_label=None, **addl_labels):
         global current_selected_label
         current_selected_label = selected_label
 
-        
+
         fig = go.Figure()
         for cls in classes[selected_label]:
             mask = df[selected_label] == cls
