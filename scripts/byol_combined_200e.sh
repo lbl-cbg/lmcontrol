@@ -1,16 +1,16 @@
 #!/bin/bash
 #SBATCH -A m3513
 #SBATCH -C gpu
-#SBATCH -q debug
+#SBATCH -q regular
 #SBATCH -c 32
 #SBATCH --gpus-per-task=1
 #SBATCH -N 1
-#SBATCH --ntasks-per-node=4
-#SBATCH --time=29:00
+#SBATCH --ntasks-per-node=1  #the script mentioned 4 originally, but we do not have 4 GPUs with us
+#SBATCH --time=24:00:00
 #SBATCH --array=0  # Only one job in the array (since we're only using one name)
-#SBATCH -e /pscratch/sd/n/niranjan/error/clf_error_rep/opta_1296_combis/optatune.%A_byol_combined_200e.err
-#SBATCH -o /pscratch/sd/n/niranjan/error/clf_error_rep/opta_1296_combis/optatune.%A_byol_combined_200e.out
-#SBATCH -J byol_combined_200e  # Job name
+#SBATCH -e /pscratch/sd/n/niranjan/error/clf_error_rep/opta_1296_combis/optatune.%A_byol_combined_200e_version1.err
+#SBATCH -o /pscratch/sd/n/niranjan/error/clf_error_rep/opta_1296_combis/optatune.%A_byol_combined_200e_version1.out
+#SBATCH -J byol_combined_200e_version1  # Job name
 
 export SLURM_CPU_BIND="cores"
 
@@ -19,6 +19,8 @@ task_name="byol_combined_200e_version1"
 INPUT_DIR="$SCRATCH/tar_ball/segmented_square_96"
 INPUT_DIR1="$SCRATCH/tar_ball/ambr_03/"
 INPUT_DIR2="/pscratch/sd/n/niranjan/tar_ball/ABF_FA_AMBR01-NSR"
+INPUT_DIR3="/pscratch/sd/n/niranjan/tar_ball/bg_noise_images"
+INPUT_DIR4="/pscratch/sd/n/niranjan/tar_ball/Images_from_water"
 
 # Run the script with the task_name
 srun lmcontrol train-byol \
@@ -149,12 +151,27 @@ srun lmcontrol train-byol \
     $INPUT_DIR2/S28/S28_HT5/all_processed.npz \
     $INPUT_DIR2/S28/S28_HT9/all_processed.npz \
     $INPUT_DIR2/S28/S28_HT12/all_processed.npz \
+    $INPUT_DIR3/HT1.1/all_processed.npz \
+    $INPUT_DIR3/HT1.2/all_processed.npz \
+    $INPUT_DIR3/HT1.3/all_processed.npz \
+    $INPUT_DIR4/Water_1/all_processed.npz \
+    $INPUT_DIR4/Water_2/all_processed.npz \
+    $INPUT_DIR4/Water_3/all_processed.npz \
+    $INPUT_DIR4/Water_4/all_processed.npz \
+    $INPUT_DIR4/Water_5/all_processed.npz \
+    $INPUT_DIR4/Water_6/all_processed.npz \
+    $INPUT_DIR4/Water_7/all_processed.npz \
+    $INPUT_DIR4/Water_8/all_processed.npz \
+    $INPUT_DIR4/Water_9/all_processed.npz \
+    $INPUT_DIR4/Water_10/all_processed.npz \
+    $INPUT_DIR4/Water_11/all_processed.npz \
+    $INPUT_DIR4/Water_12/all_processed.npz \
     --val_frac 0.2 \
     --seed 42 \
     --checkpoint /pscratch/sd/n/niranjan/output/optatune/opta_${task_name}/ \
     --epochs 200 \
     --outdir /pscratch/sd/n/niranjan/output/optatune/opta_${task_name}/ \
-    -n 2500 \
+    -n 10000 \
     --accelerator "gpu" \
     --strategy "ddp" \
     --devices 4 \
@@ -296,9 +313,24 @@ lmcontrol infer-byol \
     $INPUT_DIR2/S28/S28_HT5/all_processed.npz \
     $INPUT_DIR2/S28/S28_HT9/all_processed.npz \
     $INPUT_DIR2/S28/S28_HT12/all_processed.npz \
+    $INPUT_DIR3/HT1.1/all_processed.npz \
+    $INPUT_DIR3/HT1.2/all_processed.npz \
+    $INPUT_DIR3/HT1.3/all_processed.npz \
+    $INPUT_DIR4/Water_1/all_processed.npz \
+    $INPUT_DIR4/Water_2/all_processed.npz \
+    $INPUT_DIR4/Water_3/all_processed.npz \
+    $INPUT_DIR4/Water_4/all_processed.npz \
+    $INPUT_DIR4/Water_5/all_processed.npz \
+    $INPUT_DIR4/Water_6/all_processed.npz \
+    $INPUT_DIR4/Water_7/all_processed.npz \
+    $INPUT_DIR4/Water_8/all_processed.npz \
+    $INPUT_DIR4/Water_9/all_processed.npz \
+    $INPUT_DIR4/Water_10/all_processed.npz \
+    $INPUT_DIR4/Water_11/all_processed.npz \
+    $INPUT_DIR4/Water_12/all_processed.npz \
     --checkpoint $best_ckpt_path \
     -o /pscratch/sd/n/niranjan/output/prediction_${task_name}.npz \
-    -n 2500 \
+    -n 10000 \
     # -save_emb \
     # --save_misclassified /pscratch/sd/n/niranjan/output/optatune/ambr01_misclassify/misclassified_${task_name} \
     # --save_confusion /pscratch/sd/n/niranjan/output/optatune/ambr01_misclassify/

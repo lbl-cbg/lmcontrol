@@ -150,7 +150,9 @@ def trim_box(mask, img, size=None, pad=True):
             if h_d > 0:
                 padding_ltrb[0][0] = h_d // 2
                 padding_ltrb[0][1] = h_d // 2 + int(h_d % 2)
-            ret = np.pad(ret, padding_ltrb, mode='constant', constant_values=0)
+            
+            mean_value = np.mean(ret)
+            ret = np.pad(ret, padding_ltrb, mode='constant', constant_values=mean_value)
             Xn, Xx, Yn, Yx = _adjust_bounds(0, ret.shape[0], 0, ret.shape[1], size)
             ret = ret[Xn: Xx, Yn: Yx]
     else:
@@ -220,13 +222,15 @@ def crop_center(image, crop_size, pad=True):
     end_w = start_w + crop_w
     
     if pad:
+        mean_value = np.mean(image)
+        
         padding_h = max(0, crop_h - h)
         padding_w = max(0, crop_w - w)
         
         padded_image = np.pad(image, 
                               ((padding_h // 2, padding_h - padding_h // 2), 
                                (padding_w // 2, padding_w - padding_w // 2)),
-                              mode='constant', constant_values=0)
+                              mode='constant', constant_values=mean_value)
         
         h, w = padded_image.shape
         start_h = (h - crop_h) // 2
@@ -335,7 +339,7 @@ def main(argv=None):
 
         logger.info(f"Done segmenting images. {n_unseg} ({100 * n_unseg / len(image_paths):.1f}%) images were unsegmentable")
 
-    breakpoint()
+    
     # [(i, img.shape) for i, img in enumerate(seg_images) if img.shape != (96, 96)]
     seg_images = np.array(seg_images)
     seg_masks = np.array(seg_masks)
