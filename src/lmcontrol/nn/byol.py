@@ -1,6 +1,8 @@
 import argparse
 import copy
 import glob
+import os
+import sys
 import wandb
 
 import lightning as L
@@ -144,7 +146,8 @@ def _get_trainer(args, trial=None):
 
     callbacks = []
 
-    targs = dict(max_epochs=args.epochs, devices=args.devices, accelerator="gpu" if args.devices > 0 else "cpu", check_val_every_n_epoch=4, callbacks=callbacks)
+    targs = dict(num_nodes=args.num_nodes, max_epochs=args.epochs, devices=args.devices, 
+                 accelerator="gpu" if args.devices > 0 else "cpu", check_val_every_n_epoch=4, callbacks=callbacks)
 
     if args.devices > 1:  # If using multiple GPUs, use Distributed Data Parallel (DDP)
         targs['strategy'] = "ddp"
@@ -179,6 +182,7 @@ def _get_trainer(args, trial=None):
             wandb.init(project="SX_HTY_Run1")
             targs['logger'] = WandbLogger(project='your_project_name', log_model=True)
 
+    print(os.environ["SLURM_PROCID"], targs, file=sys.stderr)
     return L.Trainer(**targs)
 
 
@@ -210,6 +214,7 @@ def train(argv=None):
     parser.add_argument("--accelerator", type=str, help="type of accelerator for trainer", default="gpu")
     parser.add_argument("--strategy", type=str, help="type of strategy for trainer", default="auto")
     parser.add_argument("--devices", type=int, help="number of devices for trainer", default=1)
+    parser.add_argument("--num_nodes", type=int, help="number of nodes for trainer", default=4)
 
     args = parser.parse_args(argv)
 
@@ -259,7 +264,7 @@ def train(argv=None):
         print("You must specify --validation or --val_frac", file=sys.stderr)
         exit(1)
 
-    num_workers = 0 if args.debug else 4
+    num_workers = 0 if args.debug else 2  # I changed this from 4 to 2
 
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, drop_last=True, num_workers=num_workers)
     val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, drop_last=True, num_workers=num_workers)
