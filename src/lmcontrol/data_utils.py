@@ -18,7 +18,8 @@ def load_npzs(npzs, logger, n_samples=None, label_type=None):
 
     for npz_path in npzs:
         logger.debug(f"Reading {npz_path}")
-        npz = np.load(npz_path)
+        #npz = np.load(npz_path)
+        npz = np.load(npz_path, mmap_mode='r')
         
         total_samples = len(npz['masks'])
         indices = None
