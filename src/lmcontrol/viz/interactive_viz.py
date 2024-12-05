@@ -1,6 +1,8 @@
 import argparse
 import io
 import base64
+import json
+
 import pickle
 import os
 
@@ -9,8 +11,12 @@ import plotly.graph_objects as go
 
 from PIL import Image
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import plotly.colors as pc
+import plotly.graph_objects as go
+import plotly.express as px
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 
@@ -136,7 +142,7 @@ def build_app(directory, subsample=1.0, stratify_label=None, **addl_labels):
 
     npz_files = list_npz_files(directory)
 
-    # Make a function of updating the hover
+
     @callback(
         Output("scatter-tooltip", "show"),
         Output("scatter-tooltip", "bbox"),
@@ -238,31 +244,46 @@ def build_app(directory, subsample=1.0, stratify_label=None, **addl_labels):
         return dd_options, 'ht'
 
 
+    
+    def get_color_for_label(label_idx, palette=plt.cm.tab20.colors):
+        """Assign consistent colors to labels based on their index."""
+        # Use modulo operation to ensure color index is within palette range
+        color_index = label_idx % len(palette)
+        return palette[color_index]
 
+    
     @app.callback(
         Output('scatter-plot', 'figure'),
         [Input('label-dropdown', 'value')],
         [State('scatter-plot', 'relayoutData')]
     )
+
     def update_scatter_plot(selected_label, relayout_data):
         """Create Figure with scatter plot"""
-
+        
+        
         if selected_label is None:
             return go.Figure()
 
         global current_selected_label
         current_selected_label = selected_label
 
-        
         fig = go.Figure()
         for cls in classes[selected_label]:
             mask = df[selected_label] == cls
             fig_kwargs = {var: df[var][mask] for var in fig_vars}
+            
+            global label_color_map 
+
+            label_color = get_color_for_label(cls)
+            
             fig.add_trace(scatter(
                 name=str(all_labels[selected_label]['classes'][cls]),
                 mode='markers',
                 marker=dict(
                     size=2,
+                    #color=label_color
+                    color=f'rgba({label_color[0]*255}, {label_color[1]*255}, {label_color[2]*255}, 1)'
                 ),
                 **fig_kwargs
             ))
@@ -302,7 +323,6 @@ def main(argv=None):
 
     args = parser.parse_args(argv)
 
-    #app = build_app(args.npz, subsample=args.subsample, stratify_label=args.label)
     app = build_app(args.npz, subsample=args.subsample)
 
     app.run(debug=not args.prod, host='0.0.0.0', port=args.port)
