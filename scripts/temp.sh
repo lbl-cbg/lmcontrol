@@ -8,7 +8,7 @@
 #SBATCH --ntasks-per-node=4  #the script mentioned 4 originally, but we do not have 4 GPUs with us
 #SBATCH --time=20:00 
 #SBATCH -e /pscratch/sd/n/niranjan/error/clf_error_rep/opta_1296_combis/optatune.%A_byol_combined_200e_version1.err
-#SBATCH -o ls .%A_byol_combined_200e_version1.out
+#SBATCH -o /pscratch/sd/n/niranjan/error/clf_error_rep/opta_1296_combis/optatune.%A_byol_combined_200e_version1.out
 #SBATCH -J test_lightning  # Job name
 
 export SLURM_CPU_BIND="cores"
