@@ -14,6 +14,7 @@ from PIL import Image
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+
 import plotly.colors as pc
 import plotly.graph_objects as go
 import plotly.express as px
@@ -74,12 +75,6 @@ def load_data(path, subsample=None, stratify_label=None, **addl_labels):
             
     images, emb = npz['images'], npz['embedding']
 
-    # for k in addl_labels:
-    #     all_labels[k] = dict()
-    #     enc = LabelEncoder()
-    #     all_labels[k]['labels'] = enc.fit_transform(addl_labels[k])
-    #     all_labels[k]['classes'] = list(map(str, enc.classes_))
-
 
     idx = np.arange(len(images))
     # Subsample data
@@ -133,9 +128,10 @@ def load_data(path, subsample=None, stratify_label=None, **addl_labels):
         scatter = go.Scatter
         fig_vars = ['x', 'y']
 
-    
+
 def list_npz_files(directory):
     return [{'label': f, 'value': f} for f in os.listdir(directory) if f.endswith('.npz')]
+
 
 def build_app(directory, subsample=1.0, stratify_label=None, **addl_labels):
     """Build a Dash app for interactive viewing of data
@@ -154,7 +150,6 @@ def build_app(directory, subsample=1.0, stratify_label=None, **addl_labels):
     """
 
     npz_files = list_npz_files(directory)
-
 
     @callback(
         Output("scatter-tooltip", "show"),
@@ -259,15 +254,12 @@ def build_app(directory, subsample=1.0, stratify_label=None, **addl_labels):
         load_data(selected_file, subsample=subsample, stratify_label=stratify_label)
         return dd_options, 'ht'
 
-
-    
     def get_color_for_label(label_idx, palette=plt.cm.tab20.colors):
         """Assign consistent colors to labels based on their index."""
         # Use modulo operation to ensure color index is within palette range
         color_index = label_idx % len(palette)
         return palette[color_index]
 
-    
     @app.callback(
         Output('scatter-plot', 'figure'),
         [Input('label-dropdown', 'value')],
@@ -281,9 +273,12 @@ def build_app(directory, subsample=1.0, stratify_label=None, **addl_labels):
         if selected_label is None:
             return go.Figure()
 
+        if selected_label is None:
+            return go.Figure()
+
         global current_selected_label
         current_selected_label = selected_label
-        
+
         fig = go.Figure()
         if selected_label == 'time':
 

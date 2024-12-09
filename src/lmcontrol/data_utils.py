@@ -9,27 +9,28 @@ def write_npz(path, images, masks, paths, **metadata):
 
 # make label_type a string (Andrew)
 
-def load_npzs(npzs, logger, n_samples=None, label_type=None):
+def load_npzs(npzs, logger=None, n_samples=None, label_type=None):
     """Load data from NPZ files generated from lmcontrol crop command"""
     masks = []
     images = []
     paths = []
     metadata = dict()
 
+    logger = logger or get_logger('warning')
+
     for npz_path in npzs:
         logger.debug(f"Reading {npz_path}")
-        #npz = np.load(npz_path)
         npz = np.load(npz_path, mmap_mode='r', allow_pickle=True)
-        
         total_samples = len(npz['masks'])
         indices = None
-        if n_samples is not None and total_samples > n_samples:   
+        if n_samples is not None and n_samples < total_samples: # take a subset
+
             indices = np.random.permutation(total_samples)[:n_samples]
             masks.append(npz['masks'][indices])
             images.append(npz['images'][indices])
             paths.append(npz['paths'][indices])
-        else:                                                     
-            if n_samples > total_samples:
+        else:                                                   # dont take a subset
+            if n_samples is not None and n_samples > total_samples:
                 warnings.warn(f"{n_samples} is more samples than found in {npz_path}. Will use all samples")
             masks.append(npz['masks'])
             images.append(npz['images'])
@@ -37,7 +38,7 @@ def load_npzs(npzs, logger, n_samples=None, label_type=None):
 
         md_keys = set(npz.keys()) - {'paths', 'masks', 'images'}
         logger.debug(f"Found the following keys in {npz_path}: {' '.join(sorted(md_keys))}")
-        
+
         for k in sorted(md_keys):
             if npz[k].ndim == 0:
                 metadata.setdefault(k, []).extend([str(npz[k])] * images[-1].shape[0])
@@ -53,7 +54,7 @@ def load_npzs(npzs, logger, n_samples=None, label_type=None):
     images = np.concatenate(images, axis=0)
     logger.debug("Merging paths")
     paths = np.concatenate(paths, axis=0)
-    
+
     metadata = {k: np.array(v) for k, v in metadata.items()}
 
     target_len = len(masks)

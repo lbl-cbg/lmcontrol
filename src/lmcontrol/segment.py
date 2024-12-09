@@ -194,6 +194,7 @@ def add_metadata(argv=None):
     parser.add_argument("npz", type=str, help='Path to the NPZ file')
     parser.add_argument("metadata", help="a comma-separated list of key=value pairs. e.g. ht=1,time=S4", default="", type=metadata)
     args = parser.parse_args(argv)
+    
     npz = np.load(args.npz)
     data = dict(npz)
     data.update(args.metadata)
@@ -241,6 +242,7 @@ def crop_center(image, crop_size, pad=True):
         return padded_image[start_h:end_h, start_w:end_w]
     
     return image[start_h:end_h, start_w:end_w]
+
 
 def main(argv=None):
     """
