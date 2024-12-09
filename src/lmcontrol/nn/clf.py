@@ -68,20 +68,20 @@ class LightningResNet(L.LightningModule):
     loss_functions = {
         'time': nn.MSELoss(),
         'sample': CrossEntropy(),
-        'conditions': CrossEntropy(),
+        'condition': CrossEntropy(),
         'feed': CrossEntropy(),
         'starting_media': CrossEntropy()
     }
 
 
     def __init__(self, label_classes, lr=0.01, step_size=2, gamma=0.1, planes=[8, 16, 32, 64],
-                 layers=[1, 1, 1, 1], block=BasicBlock, return_embeddings=False, time_weight=1e-3): # weight2=1, weight3=1, weight4=1, weight5=1
+                 layers=[1, 1, 1, 1], block=BasicBlock, return_embeddings=False, time_weight=1e-3):
         super().__init__()
 
         self.loss_weights = {
             'time': time_weight,  
             'sample': 0,
-            'conditions': 0,
+            'condition': 0,
             'feed': 1-time_weight,
             'starting_media': 0
         }
@@ -210,7 +210,7 @@ def get_layers(layers_cmd):
 
 
 def _add_training_args(parser):
-    parser.add_argument('labels', type=str, nargs='+', choices=['time', 'feed', 'starting_media', 'conditions', 'sample'], help="the label to train with")
+    parser.add_argument('labels', type=str, nargs='+', choices=['time', 'feed', 'starting_media', 'condition', 'sample'], help="the label to train with")
     parser.add_argument("--training", type=str, nargs='+', required=True, help="directories containing training data")
 
     grp = parser.add_mutually_exclusive_group()
@@ -316,10 +316,7 @@ def _get_trainer(args, trial=None):
         )
         callbacks.append(checkpoint_callback)
 
-        
-    # add early stopping to this (refer BYOL)
-
-    if trial is not None :   # if 'trial' is passed in, assume we are using Optuna to do HPO
+    if trial is not None :  
         targs['logger'] = CSVLogger(args.outdir, name=args.experiment)
         if args.pruning:
             callbacks.append(PyTorchLightningPruningCallback(trial, monitor="combined_metric"))
@@ -348,24 +345,20 @@ def train(argv=None):
     trainer.fit(model, train_loader, val_loader)
 
 def objective(args, trial):
-    # args.batch_size = trial.suggest_int('batch_size', 32, 256, log=True)
-    # args.lr = trial.suggest_float("lr", 1e-5, 1e-2, log=True)
-    # args.step_size = trial.suggest_int('step_size', 5, 15, step=5)
-    # args.gamma = trial.suggest_float('gamma', 0.1, 0.5)
+    args.batch_size = trial.suggest_int('batch_size', 32, 256, log=True)
+    args.lr = trial.suggest_float("lr", 1e-5, 1e-2, log=True)
+    args.step_size = trial.suggest_int('step_size', 5, 15, step=5)
+    args.gamma = trial.suggest_float('gamma', 0.1, 0.5)
     args.time_weight = trial.suggest_float('time_weight', 1e-5, 1.0, log=True)
-    # args.weight2 = trial.suggest_float('weight2', 1e-5, 1.0, log=True)
-    # args.weight3 = trial.suggest_float('weight3', 1e-5, 1.0, log=True)
-    # args.weight4 = trial.suggest_float('weight4', 1e-5, 1.0, log=True)
-    # args.weight5 = trial.suggest_float('weight5', 1e-5, 1.0, log=True)
-    
-    # block_type = trial.suggest_categorical('block_type', ['BasicBlock', 'Bottleneck'])
-    # args.block = get_block(block_type)
 
-    # p = trial.suggest_categorical('planes', ['3', '4'])
-    # args.planes = get_planes(p)
+    block_type = trial.suggest_categorical('block_type', ['BasicBlock', 'Bottleneck'])
+    args.block = get_block(block_type)
 
-    # l = trial.suggest_categorical('layers', ['1', '2', '3', '4'])
-    # args.layers = get_layers(l)
+    p = trial.suggest_categorical('planes', ['3', '4'])
+    args.planes = get_planes(p)
+
+    l = trial.suggest_categorical('layers', ['1', '2', '3', '4'])
+    args.layers = get_layers(l)
 
     args.outdir = os.path.join(args.working_dir, "logs")
     args.experiment = f"trial_{trial.number:04d}"
@@ -376,11 +369,7 @@ def objective(args, trial):
 
     val_accuracy = trainer.callback_metrics.get("val_mean_accuracy", None)
     val_r2 = trainer.callback_metrics.get("val_mean_r2", None)
-    
-    # combined_metric = 0.5 * (val_accuracy if val_accuracy is not None else 0) + \
-    #                   0.5 * (val_r2 if val_r2 is not None else 0)
-                      
-    # return combined_metric
+
     return val_accuracy, val_r2
 
 def tune(argv=None):
@@ -417,7 +406,7 @@ def tune(argv=None):
 
 def predict(argv=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument('labels', type=str, nargs='+', choices=['time', 'feed', 'starting_media', 'conditions', 'sample'], help="the label to predict with")
+    parser.add_argument('labels', type=str, nargs='+', choices=['time', 'feed', 'starting_media', 'condition', 'sample'], help="the label to predict with")
     parser.add_argument("--prediction", type=str, nargs='+', required=True, help="directories containing prediction data")
     parser.add_argument("-c", "--checkpoint", type=str, help="path to the model checkpoint file to use for inference")
     parser.add_argument("-o", "--output_npz", type=str, help="the path to save the embeddings to. Saved in NPZ format")
@@ -503,14 +492,11 @@ def predict(argv=None):
 
     else:
         predictions = trainer.predict(model, predict_loader)
-        # out_data = dict(embeddings=predictions)
-        
-        #predictions = [torch.cat(l).numpy() for l in zip(*trainer.predict(model, predict_loader))]
         label_classes = model.label_classes        
         out_data = dict()
         true_labels = predict_dataset.labels
         
-        for key in label_classes: # This is currently working only for single label
+        for key in label_classes: 
             
             predictions = np.concatenate(predictions, axis=0)
             out_data[key] = {
