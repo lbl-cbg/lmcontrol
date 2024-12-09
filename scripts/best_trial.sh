@@ -12,37 +12,21 @@
 #SBATCH -J opta_10_18_01_00  # Job name
 
 # Assign custom name (SLURM_ARRAY_TASK_ID is replaced with the custom name)
-task_name="multilabels_1e-3_11_13_01_00"
+task_name="test_multilabels_11_10_01_00___"
 INPUT_DIR="$SCRATCH/tar_ball/segmented_square_96"
 
 # Run the script with the task_name
 lmcontrol sup-train \
     --training \
-    $INPUT_DIR/S4/S4_HT1/all_processed.npz \
-    $INPUT_DIR/S4/S4_HT4/all_processed.npz \
-    $INPUT_DIR/S4/S4_HT7/all_processed.npz \
-    $INPUT_DIR/S4/S4_HT10/all_processed.npz \
     $INPUT_DIR/S10/S10_HT1/all_processed.npz \
     $INPUT_DIR/S10/S10_HT4/all_processed.npz \
     $INPUT_DIR/S10/S10_HT7/all_processed.npz \
     $INPUT_DIR/S10/S10_HT10/all_processed.npz \
-    $INPUT_DIR/S14/S14_HT1/all_processed.npz \
-    $INPUT_DIR/S14/S14_HT4/all_processed.npz \
-    $INPUT_DIR/S14/S14_HT7/all_processed.npz \
-    $INPUT_DIR/S14/S14_HT10/all_processed.npz \
     --validation \
-    $INPUT_DIR/S4/S4_HT2/all_processed.npz \
-    $INPUT_DIR/S4/S4_HT5/all_processed.npz \
-    $INPUT_DIR/S4/S4_HT8/all_processed.npz \
-    $INPUT_DIR/S4/S4_HT11/all_processed.npz \
     $INPUT_DIR/S10/S10_HT2/all_processed.npz \
     $INPUT_DIR/S10/S10_HT5/all_processed.npz \
     $INPUT_DIR/S10/S10_HT8/all_processed.npz \
     $INPUT_DIR/S10/S10_HT11/all_processed.npz \
-    $INPUT_DIR/S14/S14_HT2/all_processed.npz \
-    $INPUT_DIR/S14/S14_HT5/all_processed.npz \
-    $INPUT_DIR/S14/S14_HT8/all_processed.npz \
-    $INPUT_DIR/S14/S14_HT11/all_processed.npz \
     --checkpoint /pscratch/sd/n/niranjan/output/optatune/opta_${task_name}/ \
     --epochs 25 \
     --outdir /pscratch/sd/n/niranjan/output/optatune/opta_${task_name}/ \
@@ -62,18 +46,10 @@ best_ckpt_path="/pscratch/sd/n/niranjan/output/optatune/opta_${task_name}/$best_
 # Run the prediction step using the best checkpoint
 lmcontrol sup-predict \
     --prediction \
-    $INPUT_DIR/S4/S4_HT3/all_processed.npz \
-    $INPUT_DIR/S4/S4_HT6/all_processed.npz \
-    $INPUT_DIR/S4/S4_HT9/all_processed.npz \
-    $INPUT_DIR/S4/S4_HT12/all_processed.npz \
     $INPUT_DIR/S10/S10_HT3/all_processed.npz \
     $INPUT_DIR/S10/S10_HT6/all_processed.npz \
     $INPUT_DIR/S10/S10_HT9/all_processed.npz \
     $INPUT_DIR/S10/S10_HT12/all_processed.npz \
-    $INPUT_DIR/S14/S14_HT3/all_processed.npz \
-    $INPUT_DIR/S14/S14_HT6/all_processed.npz \
-    $INPUT_DIR/S14/S14_HT9/all_processed.npz \
-    $INPUT_DIR/S14/S14_HT12/all_processed.npz \
     --checkpoint $best_ckpt_path \
     -o /pscratch/sd/n/niranjan/output/prediction_${task_name}.npz \
     -n 9500 \

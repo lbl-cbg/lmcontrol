@@ -7,12 +7,12 @@
 #SBATCH -n 1
 #SBATCH --time=2:30:00
 #SBATCH --array=0  # Only one job in the array (since we're only using one name)
-#SBATCH -e /pscratch/sd/n/niranjan/error/clf_error_rep/opta_1296_combis/optatune.%A_10_18_03_00.err
-#SBATCH -o /pscratch/sd/n/niranjan/error/clf_error_rep/opta_1296_combis/optatune.%A_10_18_03_00.out
-#SBATCH -J opta_10_18_03_00  # Job name
+#SBATCH -e /pscratch/sd/n/niranjan/error/clf_error_rep/opta_1296_combis/optatune.%A_multilabels_5e-4_40e_ambr03.err
+#SBATCH -o /pscratch/sd/n/niranjan/error/clf_error_rep/opta_1296_combis/optatune.%A_multilabels_5e-4_40e_ambr03.out
+#SBATCH -J multilabels_5e-4_40e_ambr03. # Job name
 
 # Assign custom name (SLURM_ARRAY_TASK_ID is replaced with the custom name)
-task_name="multilabels_1e-3_11_13_03_00"
+task_name="multilabels_5e-4_40e_ambr03."
 
 # SLURM_ARRAY_TASK_ID=${SLURM_ARRAY_TASK_ID:-10_15_03_00}
 INPUT_DIR="$SCRATCH/tar_ball/ambr_03/"
@@ -40,11 +40,12 @@ lmcontrol sup-train \
     --val_frac 0.2 \
     --seed 42 \
     --checkpoint $SCRATCH/output/optatune/ambr03/opta_${task_name}/ \
-    --epochs 25 \
+    --epochs 40 \
     --outdir $SCRATCH/output/optatune/ambr03/opta_${task_name}/ \
     -n 9500 \
-    --early_stopping \
     testing0 \
+    --stop_wandb \
+    --time_weight 5e-4 \
     feed \
     time \
 
@@ -86,3 +87,4 @@ lmcontrol sup-predict \
    
 # Here time is expected to below -n in any case
 
+cp /pscratch/sd/n/niranjan/output/ambr03/prediction_${task_name}.npz /global/cfs/cdirs/m3513/sdbr/lmcontrol/bisabolene_CN/sup/multimodal/

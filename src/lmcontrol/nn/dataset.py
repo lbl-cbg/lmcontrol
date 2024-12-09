@@ -71,7 +71,7 @@ class LMDataset(Dataset):
     def is_regression(cls, label):
         return label in cls.__regression_labels
 
-    def __init__(self, npzs, label_classes=None, use_masks=False, return_labels=False, logger=None, transform=None, label_type=None, n_samples=None, return_embeddings=None, split=None, val_size=None, seed=None):
+    def __init__(self, npzs, label_classes=None, use_masks=False, return_labels=False, logger=None, transform=None, label_type=None, n_samples=None, split=None, val_size=None, seed=None):
         """
         Args:
             npzs (array-like)       : A list or tuple of paths to NPZ files containing cropped images
@@ -117,8 +117,9 @@ class LMDataset(Dataset):
                 tmp.append(labels)
 
             self.labels = tmp
-            self.metadata = metadata
-
+            
+        self.metadata = metadata
+        
         if val_size:
             self._split_data(split, val_size, seed)
 
@@ -126,19 +127,26 @@ class LMDataset(Dataset):
         num_samples = len(self.data)
         indices = np.arange(num_samples)
 
-        stratify_label = np.stack([label.numpy() for label in self.labels], axis=1)
-        composite_label = [tuple(row) for row in stratify_label]
+        if self.labels is not None:
+            stratify_label = np.stack([label.numpy() for label in self.labels], axis=1)
+            composite_label = [tuple(row) for row in stratify_label]
 
-        train_indices, val_indices = train_test_split(
-            indices, test_size=val_size, random_state=seed, stratify=composite_label
-        )
+            train_indices, val_indices = train_test_split(
+                indices, test_size=val_size, random_state=seed, stratify=composite_label
+            )
+        else:
+            train_indices, val_indices = train_test_split(
+                indices, test_size=val_size, random_state=seed
+            )
 
         if split == 'train':
             self.data = self.data[train_indices]
-            self.labels = [label[train_indices] for label in self.labels]
+            if self.labels is not None:
+                self.labels = [label[train_indices] for label in self.labels]
         elif split == 'validate':
             self.data = self.data[val_indices]
-            self.labels = [label[val_indices] for label in self.labels]
+            if self.labels is not None:
+                self.labels = [label[val_indices] for label in self.labels]
 
     def __getitem__(self, i):
         ret = self.data[i]
