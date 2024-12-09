@@ -284,6 +284,9 @@ def main(argv=None):
     parser.add_argument('-p', '--pad', default=False, action='store_true',
                         help='pad segmented image with zeros to size indicated with --crop. Otherwise use pad with original image contents')
     parser.add_argument("-m", "--metadata", help="a comma-separated list of key=value pairs. e.g. ht=1,time=S4", default="", type=metadata)
+    parser.add_argument('-cc', '--crop_center', action='store_true', default=False,
+                        help='the flag to crop the center part of image in case the image is unsegmentable')
+        
     args = parser.parse_args(argv)
 
     logger = get_logger()
@@ -332,11 +335,17 @@ def main(argv=None):
             seg_masks.append(segm)
         except UnsegmentableError:
             n_unseg += 1
-            center_cropped_image = crop_center(image, crop_size=args.crop, pad=args.pad)
-            
-            seg_images.append(center_cropped_image)
-            seg_masks.append(np.zeros_like(center_cropped_image))  
-            paths.append(tif)  
+            if args.save_unseg:
+                target = os.path.join(unseg_dir, os.path.basename(tif))
+                if not dir_exists:
+                    os.makedirs(os.path.dirname(target), exist_ok=True)
+                    dir_exists = True
+                sio.imsave(target, image)             
+            if args.crop_center:
+                center_cropped_image = crop_center(image, crop_size=args.crop, pad=args.pad)
+                seg_images.append(center_cropped_image)
+                seg_masks.append(np.zeros_like(center_cropped_image))  
+                paths.append(tif)  
             continue
 
         logger.info(f"Done segmenting images. {n_unseg} ({100 * n_unseg / len(image_paths):.1f}%) images were unsegmentable")
