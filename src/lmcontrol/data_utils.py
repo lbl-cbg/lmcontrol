@@ -19,7 +19,7 @@ def load_npzs(npzs, logger, n_samples=None, label_type=None):
     for npz_path in npzs:
         logger.debug(f"Reading {npz_path}")
         #npz = np.load(npz_path)
-        npz = np.load(npz_path, mmap_mode='r')
+        npz = np.load(npz_path, mmap_mode='r', allow_pickle=True)
         
         total_samples = len(npz['masks'])
         indices = None
@@ -31,7 +31,6 @@ def load_npzs(npzs, logger, n_samples=None, label_type=None):
         else:                                                     
             if n_samples > total_samples:
                 warnings.warn(f"{n_samples} is more samples than found in {npz_path}. Will use all samples")
-            n_samples = total_samples
             masks.append(npz['masks'])
             images.append(npz['images'])
             paths.append(npz['paths'])
@@ -41,7 +40,7 @@ def load_npzs(npzs, logger, n_samples=None, label_type=None):
         
         for k in sorted(md_keys):
             if npz[k].ndim == 0:
-                metadata.setdefault(k, []).extend([str(npz[k])] * n_samples)
+                metadata.setdefault(k, []).extend([str(npz[k])] * images[-1].shape[0])
             else:
                 if indices is not None:
                     metadata.setdefault(k, []).extend(npz[k][indices])
