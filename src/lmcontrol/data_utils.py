@@ -21,7 +21,10 @@ def load_npzs(npzs, logger=None, n_samples=None, label_type=None):
     for npz_path in npzs:
         logger.debug(f"Reading {npz_path}")
         npz = np.load(npz_path, mmap_mode='r', allow_pickle=True)
-        total_samples = len(npz['masks'])
+        if 'masks' in npz:
+            total_samples = len(npz['masks'])
+        else:
+            total_samples = len(npz['images'])
         indices = None
         if n_samples is not None and n_samples < total_samples: # take a subset
 
@@ -32,9 +35,11 @@ def load_npzs(npzs, logger=None, n_samples=None, label_type=None):
         else:                                                   # dont take a subset
             if n_samples is not None and n_samples > total_samples:
                 warnings.warn(f"{n_samples} is more samples than found in {npz_path}. Will use all samples")
-            masks.append(npz['masks'])
+            if 'masks' in npz:
+                masks.append(npz['masks'])
             images.append(npz['images'])
-            paths.append(npz['paths'])
+            if 'paths' in npz:
+                paths.append(npz['paths'])
 
         md_keys = set(npz.keys()) - {'paths', 'masks', 'images'}
         logger.debug(f"Found the following keys in {npz_path}: {' '.join(sorted(md_keys))}")
@@ -48,12 +53,14 @@ def load_npzs(npzs, logger=None, n_samples=None, label_type=None):
                 else:
                     metadata.setdefault(k, []).extend(npz[k])
 
-    logger.debug("Merging masks")
-    masks = np.concatenate(masks, axis=0)
+    if masks:
+        logger.debug("Merging masks")
+        masks = np.concatenate(masks, axis=0)
     logger.debug("Merging images")
     images = np.concatenate(images, axis=0)
-    logger.debug("Merging paths")
-    paths = np.concatenate(paths, axis=0)
+    if paths:
+        logger.debug("Merging paths")
+        paths = np.concatenate(paths, axis=0)
 
     metadata = {k: np.array(v) for k, v in metadata.items()}
 
