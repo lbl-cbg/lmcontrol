@@ -48,31 +48,31 @@ def load_data(path, subsample=None, stratify_label=None, **addl_labels):
 
     npz = np.load(path, mmap_mode='r', allow_pickle=True)
     all_labels = dict()
-    
+
     if 'metadata' in npz:
 
-        metadata = npz['metadata'].item()  
+        metadata = npz['metadata'].item()
 
         for key in metadata.keys():
             enc = LabelEncoder()
             labels_key = f"{key}_labels"
             classes_key = f"{key}_classes"
-            
+
             all_labels[key] = {
                 'labels': enc.fit_transform(metadata[key]),
                 'classes': list(map(str, enc.classes_))
-            }  
+            }
             if key == 'time':
-                all_labels[key]['values'] = metadata[key].astype(float) 
-                
+                all_labels[key]['values'] = metadata[key].astype(float)
+
     else:
-        
+
         for k in npz.keys():
             if '_labels' in k:
                 label = k[:-7]
                 all_labels[label] = {'labels': npz[label+'_labels'], 'classes': npz[label+'_classes']}
-                
-            
+
+
     images, emb = npz['images'], npz['embedding']
 
 
@@ -109,13 +109,13 @@ def load_data(path, subsample=None, stratify_label=None, **addl_labels):
     df_data['text'] = display_text
 
     df_data1 = []
-    
+
     for k in all_labels:
         df_data[k] = all_labels[k]['labels']
         if k == 'time':
             df_data1 = all_labels[k]['values'].tolist()
 
-    df1 = pd.DataFrame(df_data1, columns=['time_values']) 
+    df1 = pd.DataFrame(df_data1, columns=['time_values'])
     df = pd.DataFrame(df_data)
     classes = {k: df[k].unique() for k in all_labels}
 
@@ -268,8 +268,8 @@ def build_app(directory, subsample=1.0, stratify_label=None, **addl_labels):
 
     def update_scatter_plot(selected_label, relayout_data):
         """Create Figure with scatter plot"""
-        
-        
+
+
         if selected_label is None:
             return go.Figure()
 
@@ -289,12 +289,12 @@ def build_app(directory, subsample=1.0, stratify_label=None, **addl_labels):
 
             custom_cmap = LinearSegmentedColormap.from_list(
                 'CustomRdBu',
-                [(0, 'black'), (1, 'red')]  
+                [(0, 'black'), (1, 'red')]
             )
 
-            n_colors = 256  
+            n_colors = 256
             cmap_values = np.linspace(0, 1, n_colors)
-            rgb_colors = [custom_cmap(value)[:3] for value in cmap_values]  
+            rgb_colors = [custom_cmap(value)[:3] for value in cmap_values]
             plotly_colorscale = [
                 [val, f"rgb({int(r*255)}, {int(g*255)}, {int(b*255)})"]
                 for val, (r, g, b) in zip(cmap_values, rgb_colors)
@@ -302,31 +302,31 @@ def build_app(directory, subsample=1.0, stratify_label=None, **addl_labels):
 
             fig.add_trace(go.Scatter3d(
                 mode='markers',
-                name='Time Gradient',  
+                name='Time Gradient',
                 marker=dict(
-                    size=2,  
-                    color=df1['time_values'].values, 
-                    colorscale=plotly_colorscale,  
+                    size=2,
+                    color=df1['time_values'].values,
+                    colorscale=plotly_colorscale,
                     colorbar=dict(
-                        title='Time', 
-                        tickvals=[global_time_min, global_time_max], 
-                        ticktext=[global_time_min, global_time_max]  
+                        title='Time',
+                        tickvals=[global_time_min, global_time_max],
+                        ticktext=[global_time_min, global_time_max]
                     ),
-                    cmin=global_time_min,  
-                    cmax=global_time_max,  
+                    cmin=global_time_min,
+                    cmax=global_time_max,
                 ),
                 **fig_kwargs
             ))
-            
+
         else:
             for cls in classes[selected_label]:
                 mask = df[selected_label] == cls
                 fig_kwargs = {var: df[var][mask] for var in fig_vars}
-                                
-                global label_color_map 
+
+                global label_color_map
 
                 label_color = get_color_for_label(cls)
-                
+
                 fig.add_trace(scatter(
                     name=str(all_labels[selected_label]['classes'][cls]),
                     mode='markers',

@@ -59,7 +59,7 @@ def load_npzs(npzs, logger=None, n_samples=None, label_type=None):
 
     target_len = len(masks)
     consistent_metadata = {}
-    for k, v in metadata.items(): 
+    for k, v in metadata.items():
         if len(v) == target_len:
             consistent_metadata[k] = v
         else:

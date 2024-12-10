@@ -79,7 +79,7 @@ class LightningResNet(L.LightningModule):
         super().__init__()
 
         self.loss_weights = {
-            'time': time_weight,  
+            'time': time_weight,
             'sample': 0,
             'condition': 0,
             'feed': 1-time_weight,
@@ -87,7 +87,7 @@ class LightningResNet(L.LightningModule):
         }
 
 
-        self.label_classes = label_classes      
+        self.label_classes = label_classes
 
         self.activations = [nn.Sequential(nn.Softplus(), nn.Flatten(start_dim=0)) if LMDataset.is_regression(l) else nn.Softmax(dim=1)
                             for l in self.label_classes]
@@ -123,33 +123,33 @@ class LightningResNet(L.LightningModule):
                 start_idx = end_idx
             return tuple(ret)
         else:
-            
+
             return outputs
 
-    
+
     def _score(self, step_type, outputs, loss_components, true_labels):
         total_r2 = 0
         total_accuracy = 0
         regression_tasks = 0
         classification_tasks = 0
-        
-        
+
+
         for _label_type, _output, _loss, _label in zip(self.label_classes, outputs, loss_components, true_labels):
             _classes = self.label_classes[_label_type]
             self.log(f"{step_type}_{_label_type}_loss", _loss, on_step=False, on_epoch=True)
-            
-            if _classes is None:  
+
+            if _classes is None:
                 r2 = r2_score(_label.cpu().detach().numpy(), _output.cpu().detach().numpy())
                 self.log(f"{step_type}_{_label_type}_r2", r2, on_step=False, on_epoch=True)
                 total_r2 += r2
                 regression_tasks += 1
-            else: 
+            else:
                 preds = torch.argmax(_output, dim=1)
                 acc = accuracy_score(_label.cpu().numpy(), preds.cpu().numpy())
                 self.log(f"{step_type}_{_label_type}_accuracy", acc, on_step=False, on_epoch=True)
                 total_accuracy += acc
                 classification_tasks += 1
-        
+
         if regression_tasks > 0:
             mean_r2 = total_r2 / regression_tasks
             self.log(f'{step_type}_mean_r2', mean_r2, on_step=False, on_epoch=True)
@@ -157,8 +157,8 @@ class LightningResNet(L.LightningModule):
             mean_accuracy = total_accuracy / classification_tasks
             self.log(f'{step_type}_mean_accuracy', mean_accuracy, on_step=False, on_epoch=True)
 
-                
-        
+
+
     def training_step(self, batch, batch_idx):
         images, labels = batch
         outputs = self.forward(images)
@@ -175,12 +175,12 @@ class LightningResNet(L.LightningModule):
         images, labels = batch
         outputs = self.forward(images)
         loss_components = self.criterion(outputs, labels)
-        
+
         self._score("val", outputs, loss_components, labels)
-        
+
         total_loss = sum(loss_components)
         self.log('total_val_loss', total_loss, on_step=False, on_epoch=True)
-    
+
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[10, 20, 30], gamma=self.gamma)
@@ -316,7 +316,7 @@ def _get_trainer(args, trial=None):
         )
         callbacks.append(checkpoint_callback)
 
-    if trial is not None :  
+    if trial is not None :
         targs['logger'] = CSVLogger(args.outdir, name=args.experiment)
         if args.pruning:
             callbacks.append(PyTorchLightningPruningCallback(trial, monitor="combined_metric"))
@@ -362,7 +362,7 @@ def objective(args, trial):
 
     args.outdir = os.path.join(args.working_dir, "logs")
     args.experiment = f"trial_{trial.number:04d}"
-    
+
     train_loader, val_loader, model = _get_loaders_and_model(args)
     trainer = _get_trainer(args, trial=trial)
     trainer.fit(model, train_loader, val_loader)
@@ -400,7 +400,7 @@ def tune(argv=None):
     obj = partial(objective, args)
 
     study = optuna.create_study(storage=f"sqlite:///{db}", study_name="study", load_if_exists=True, directions=["maximize", "maximize"])
-    
+
     study.optimize(obj, n_trials=args.n_trials)
     logger.info(f"Best trials: {study.best_trials}")
 
@@ -427,13 +427,13 @@ def predict(argv=None):
 
     logger.info(f"Loading prediction data: {len(predict_files)} files")
     predict_dataset = LMDataset(predict_files, transform=transform, logger=logger, return_labels=True, label_type=args.labels, n_samples=n, return_embeddings=args.return_embeddings)
-    
+
     model = LightningResNet.load_from_checkpoint(args.checkpoint, label_classes=predict_dataset.label_classes, return_embeddings=args.return_embeddings)
 
     for i in range(len(predict_dataset.labels)):
         current_labels = predict_dataset.labels[i]
         logger.info(predict_dataset.label_type[i] + " - " + str(torch.unique(current_labels)))
-        
+
 
     predict_loader = DataLoader(predict_dataset, batch_size=32, shuffle=False, drop_last=False, num_workers=3)
 
@@ -446,19 +446,19 @@ def predict(argv=None):
     if not args.return_embeddings:
         predictions = [torch.cat(l).numpy() for l in zip(*trainer.predict(model, predict_loader))]
         true_labels = predict_dataset.labels
-        label_classes = model.label_classes        
+        label_classes = model.label_classes
         out_data = dict()
-        
-        for pred, true, key in zip(predictions, true_labels, label_classes): 
+
+        for pred, true, key in zip(predictions, true_labels, label_classes):
             true = true.numpy()
-            
+
             out_data[key] = {
                 'output': pred,
                 'labels': true,
             }
-            
-            if LMDataset.is_regression(key):  
-    
+
+            if LMDataset.is_regression(key):
+
                 mse = mean_squared_error(true, pred)
                 mae = mean_absolute_error(true, pred)
                 r2 = r2_score(true, pred)
@@ -473,11 +473,11 @@ def predict(argv=None):
                     residuals = true - pred
                     out_data[key]['residuals'] = residuals
 
-            else:  
+            else:
                 logger.info(f"Mode: Classification for {key}")
 
                 pred_labels = np.argmax(pred, axis=1)
-                
+
                 accuracy = accuracy_score(true, pred_labels)
                 precision = precision_score(true, pred_labels, average='weighted')
                 recall = recall_score(true, pred_labels, average='weighted')
@@ -492,19 +492,19 @@ def predict(argv=None):
 
     else:
         predictions = trainer.predict(model, predict_loader)
-        label_classes = model.label_classes        
+        label_classes = model.label_classes
         out_data = dict()
         true_labels = predict_dataset.labels
-        
-        for key in label_classes: 
-            
+
+        for key in label_classes:
+
             predictions = np.concatenate(predictions, axis=0)
             out_data[key] = {
                 'output': predictions,
                 'labels': true_labels
             }
-    
-    
+
+
     if not args.pred_only:
         dset = predict_dataset
         out_data['images'] = np.asarray(torch.squeeze(dset.data))
