@@ -42,8 +42,8 @@ class BYOL(L.LightningModule):
                  layers=[1, 1, 1, 1], block=BasicBlock, return_embeddings=False, time_weight=1e-3):
         super().__init__()
 
-        self.label_classes = label_classes 
-        
+        self.label_classes = label_classes
+
         resnet = ResNet(block=block, layers=layers, planes=planes, num_outputs=0, return_embeddings=return_embeddings)
 
         n_features = resnet.n_features
@@ -146,13 +146,13 @@ def _get_trainer(args, trial=None):
 
     callbacks = []
 
-    targs = dict(num_nodes=args.num_nodes, max_epochs=args.epochs, devices=args.devices, 
+    targs = dict(num_nodes=args.num_nodes, max_epochs=args.epochs, devices=args.devices,
                  accelerator="gpu" if args.devices > 0 else "cpu", check_val_every_n_epoch=4, callbacks=callbacks)
 
     if args.devices > 1:  # If using multiple GPUs, use Distributed Data Parallel (DDP)
         targs['strategy'] = "ddp"
-        
-    # should we use r2 score and val_accuracy for measurement 
+
+    # should we use r2 score and val_accuracy for measurement
     if args.checkpoint:
         checkpoint_callback = ModelCheckpoint(
             dirpath=args.checkpoint,
@@ -164,10 +164,10 @@ def _get_trainer(args, trial=None):
         callbacks.append(checkpoint_callback)
 
     early_stopping_callback = EarlyStopping(
-        monitor="total_val_loss",  
-        patience=5,                
-        min_delta=0.001,         
-        mode="min"                 
+        monitor="total_val_loss",
+        patience=5,
+        min_delta=0.001,
+        mode="min"
     )
     callbacks.append(early_stopping_callback)
 
@@ -222,7 +222,7 @@ def train(argv=None):
 
     # transform_train = _get_transforms('float', 'norm','blur','rotate', 'crop','hflip', 'vflip', 'noise', 'rgb')
     # transform_val = _get_transforms('float', 'norm','blur','rotate', 'crop','hflip', 'vflip', 'noise', 'rgb')
-    
+
     transform_train = get_transform()
     transform_val = get_transform(
             transform1=_get_transforms('float', 'norm', 'rotate', 'crop', 'hflip', 'vflip', 'rgb'),
@@ -270,7 +270,7 @@ def train(argv=None):
     val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, drop_last=True, num_workers=num_workers)
 
     label_classes=train_dataset.label_classes
-    
+
     model = BYOL(label_classes)
     trainer = _get_trainer(args)
 
@@ -291,11 +291,11 @@ def predict(argv=None):
     args = parser.parse_args(argv)
 
     logger = get_logger('info')
-    transform = _get_transforms('float', 'norm', 'crop', 'rgb')   
-    
+    transform = _get_transforms('float', 'norm', 'crop', 'rgb')
+
     test_files = args.prediction
     n = args.n_samples
-    
+
     logger.info(f"Loading inference data: {len(test_files)} files")
     test_dataset = LMDataset(test_files, transform=transform, logger=logger, return_labels=False, n_samples=n)
 
@@ -315,9 +315,9 @@ def predict(argv=None):
         dset = test_dataset
         out_data['images'] = np.asarray(torch.squeeze(dset.data))
         out_data['metadata'] = {key: np.asarray(dset.metadata[key]) for key in dset.metadata}
-    
+
     logger.info("Saving output")
-        
+
     np.savez(args.output_npz, **out_data)
 
 

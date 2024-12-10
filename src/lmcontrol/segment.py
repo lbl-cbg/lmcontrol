@@ -348,7 +348,7 @@ def main(argv=None):
                 paths.append(tif)  
             continue
 
-        logger.info(f"Done segmenting images. {n_unseg} ({100 * n_unseg / len(image_paths):.1f}%) images were unsegmentable")
+    logger.info(f"Done segmenting images. {n_unseg} ({100 * n_unseg / len(image_paths):.1f}%) images were unsegmentable")
 
     
     # [(i, img.shape) for i, img in enumerate(seg_images) if img.shape != (96, 96)]

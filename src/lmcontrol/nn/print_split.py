@@ -94,7 +94,7 @@ if len(sys.argv) < 3:
 else:
     i = int(sys.argv[2])
 
-indices = base6(i)  
+indices = base6(i)
 
 perms = [perms[j] for j in base6(i)]
 split = list()

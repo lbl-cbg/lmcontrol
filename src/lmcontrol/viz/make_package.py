@@ -95,11 +95,11 @@ def main(argv=None):
         metric = args.metric or metric
 
     emb = compute_embedding(data, logger, metric=metric, two_d=args.two_dim, center_images=args.center)
-    
+
     logger.info(f"Saving embeddings, images, and metadata to {args.out_npz}", )
     np.savez(args.out_npz, images=images, embedding=emb, metadata=metadata, **kwargs)
 
- 
+
 if __name__ == "__main__":
     main()
 

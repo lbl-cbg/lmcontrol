@@ -64,9 +64,9 @@ class Norm(T._transform.Transform):
 
 
 class LMDataset(Dataset):
-    
+
     __regression_labels = {'time'}
-    
+
     @classmethod
     def is_regression(cls, label):
         return label in cls.__regression_labels
@@ -117,9 +117,9 @@ class LMDataset(Dataset):
                 tmp.append(labels)
 
             self.labels = tmp
-            
+
         self.metadata = metadata
-        
+
         if val_size:
             self._split_data(split, val_size, seed)
 
