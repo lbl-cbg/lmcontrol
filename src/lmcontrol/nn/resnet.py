@@ -3,15 +3,11 @@ from typing import Any, Callable, List, Optional, Type, Union
 
 from torchvision.utils import _log_api_usage_once
 from torchvision.models.resnet import Bottleneck, BasicBlock, conv1x1, conv3x3
-from torchvision.models._utils import _ovewrite_named_param
-from torchvision.models._api import register_model, Weights, WeightsEnum
 
 import torch
 import torch.nn as nn
 from torch import Tensor
 
-from torchvision.models._meta import _IMAGENET_CATEGORIES
-from torchvision.models._utils import _ovewrite_named_param, handle_legacy_interface
 
 class ResNet(nn.Module):
     def __init__(
