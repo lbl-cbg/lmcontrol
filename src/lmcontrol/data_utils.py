@@ -20,50 +20,59 @@ def load_npzs(npzs, logger=None, n_samples=None, label_type=None):
 
     for npz_path in npzs:
         logger.debug(f"Reading {npz_path}")
-        npz = np.load(npz_path)
-
-        total_samples = len(npz['masks'])
+        npz = np.load(npz_path, mmap_mode='r', allow_pickle=True)
+        if 'masks' in npz:
+            total_samples = len(npz['masks'])
+        else:
+            total_samples = len(npz['images'])
         indices = None
-        if n_samples is not None and n_samples < total_samples:    # take a subset
+        if n_samples is not None and n_samples < total_samples: # take a subset
+
             indices = np.random.permutation(total_samples)[:n_samples]
             masks.append(npz['masks'][indices])
             images.append(npz['images'][indices])
             paths.append(npz['paths'][indices])
-        else:                                                      # dont take a subset
+        else:                                                   # dont take a subset
             if n_samples is not None and n_samples > total_samples:
                 warnings.warn(f"{n_samples} is more samples than found in {npz_path}. Will use all samples")
-            n_samples = total_samples
-            masks.append(npz['masks'])
+            if 'masks' in npz:
+                masks.append(npz['masks'])
             images.append(npz['images'])
-            paths.append(npz['paths'])
+            if 'paths' in npz:
+                paths.append(npz['paths'])
 
         md_keys = set(npz.keys()) - {'paths', 'masks', 'images'}
         logger.debug(f"Found the following keys in {npz_path}: {' '.join(sorted(md_keys))}")
 
         for k in sorted(md_keys):
             if npz[k].ndim == 0:
-                metadata.setdefault(k, []).extend([str(npz[k])] * n_samples)
+                metadata.setdefault(k, []).extend([str(npz[k])] * images[-1].shape[0])
             else:
                 if indices is not None:
                     metadata.setdefault(k, []).extend(npz[k][indices])
                 else:
                     metadata.setdefault(k, []).extend(npz[k])
 
-    logger.debug("Merging masks")
-    masks = np.concatenate(masks, axis=0)
+    if masks:
+        logger.debug("Merging masks")
+        masks = np.concatenate(masks, axis=0)
     logger.debug("Merging images")
     images = np.concatenate(images, axis=0)
-    logger.debug("Merging paths")
-    paths = np.concatenate(paths, axis=0)
+    if paths:
+        logger.debug("Merging paths")
+        paths = np.concatenate(paths, axis=0)
 
     metadata = {k: np.array(v) for k, v in metadata.items()}
 
     target_len = len(masks)
-    for k in metadata.keys():
-        if len(metadata[k]) != target_len:
-            logger.critical(f"Metadata '{k}' not found in all NPZ files")
-            raise ValueError(f"Metadata '{k}' length mismatch: expected {target_len}, got {len(metadata[k])}")
-    return masks, images, paths, metadata
+    consistent_metadata = {}
+    for k, v in metadata.items():
+        if len(v) == target_len:
+            consistent_metadata[k] = v
+        else:
+            logger.warning(f"Skipping metadata '{k}' due to length mismatch: expected {target_len}, got {len(v)}")
+
+    return masks, images, paths, consistent_metadata
 
 def encode_labels(labels, mode, classes=None, return_classes=False):
     """This is a wrapper for sklearn.preprocessing.LabelEncoder"""

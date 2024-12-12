@@ -1,6 +1,8 @@
 import argparse
 import io
 import base64
+import json
+
 import pickle
 import os
 
@@ -9,8 +11,15 @@ import plotly.graph_objects as go
 
 from PIL import Image
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+
+import plotly.colors as pc
+import plotly.graph_objects as go
+import plotly.express as px
+
+from matplotlib.colors import Normalize, LinearSegmentedColormap
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 
@@ -30,6 +39,7 @@ df = classes = dd_options = all_labels = scatter = fig_vars = None
 
 def load_data(path, subsample=None, stratify_label=None, **addl_labels):
     global df
+    global df1
     global classes
     global dd_options
     global all_labels
@@ -45,11 +55,16 @@ def load_data(path, subsample=None, stratify_label=None, **addl_labels):
 
         for key in metadata.keys():
             enc = LabelEncoder()
+            labels_key = f"{key}_labels"
+            classes_key = f"{key}_classes"
 
             all_labels[key] = {
                 'labels': enc.fit_transform(metadata[key]),
                 'classes': list(map(str, enc.classes_))
-        }
+            }
+            if key == 'time':
+                all_labels[key]['values'] = metadata[key].astype(float)
+
     else:
 
         for k in npz.keys():
@@ -59,12 +74,6 @@ def load_data(path, subsample=None, stratify_label=None, **addl_labels):
 
 
     images, emb = npz['images'], npz['embedding']
-
-    for k in addl_labels:
-        all_labels[k] = dict()
-        enc = LabelEncoder()
-        all_labels[k]['labels'] = enc.fit_transform(addl_labels[k])
-        all_labels[k]['classes'] = list(map(str, enc.classes_))
 
 
     idx = np.arange(len(images))
@@ -98,8 +107,15 @@ def load_data(path, subsample=None, stratify_label=None, **addl_labels):
     fig_vars = list(df_data)  # use this so we know what kwargs to pass into our scatter graph object
     df_data['images'] = encoded_images
     df_data['text'] = display_text
+
+    df_data1 = []
+
     for k in all_labels:
         df_data[k] = all_labels[k]['labels']
+        if k == 'time':
+            df_data1 = all_labels[k]['values'].tolist()
+
+    df1 = pd.DataFrame(df_data1, columns=['time_values'])
     df = pd.DataFrame(df_data)
     classes = {k: df[k].unique() for k in all_labels}
 
@@ -115,6 +131,7 @@ def load_data(path, subsample=None, stratify_label=None, **addl_labels):
 
 def list_npz_files(directory):
     return [{'label': f, 'value': f} for f in os.listdir(directory) if f.endswith('.npz')]
+
 
 def build_app(directory, subsample=1.0, stratify_label=None, **addl_labels):
     """Build a Dash app for interactive viewing of data
@@ -134,7 +151,6 @@ def build_app(directory, subsample=1.0, stratify_label=None, **addl_labels):
 
     npz_files = list_npz_files(directory)
 
-    # Make a function of updating the hover
     @callback(
         Output("scatter-tooltip", "show"),
         Output("scatter-tooltip", "bbox"),
@@ -150,10 +166,13 @@ def build_app(directory, subsample=1.0, stratify_label=None, **addl_labels):
         bbox = hover_data["bbox"]
         num = hover_data["pointNumber"]
 
-        class_id = hover_data['curveNumber']
-        class_val = classes[current_selected_label][class_id]
-        mask = df[current_selected_label] == class_val
-        pt_series = df[['images', 'text']][mask].iloc[num]
+        if current_selected_label != 'time':
+            class_id = hover_data['curveNumber']
+            class_val = classes[current_selected_label][class_id]
+            mask = df[current_selected_label] == class_val
+            pt_series = df[['images', 'text']][mask].iloc[num]
+        else:
+            pt_series = df[['images', 'text']].iloc[num]
         im_url = pt_series['images']
         disp_txt = pt_series['text']
 
@@ -235,15 +254,24 @@ def build_app(directory, subsample=1.0, stratify_label=None, **addl_labels):
         load_data(selected_file, subsample=subsample, stratify_label=stratify_label)
         return dd_options, 'ht'
 
-
+    def get_color_for_label(label_idx, palette=plt.cm.tab20.colors):
+        """Assign consistent colors to labels based on their index."""
+        # Use modulo operation to ensure color index is within palette range
+        color_index = label_idx % len(palette)
+        return palette[color_index]
 
     @app.callback(
         Output('scatter-plot', 'figure'),
         [Input('label-dropdown', 'value')],
         [State('scatter-plot', 'relayoutData')]
     )
+
     def update_scatter_plot(selected_label, relayout_data):
         """Create Figure with scatter plot"""
+
+
+        if selected_label is None:
+            return go.Figure()
 
         if selected_label is None:
             return go.Figure()
@@ -251,19 +279,63 @@ def build_app(directory, subsample=1.0, stratify_label=None, **addl_labels):
         global current_selected_label
         current_selected_label = selected_label
 
-
         fig = go.Figure()
-        for cls in classes[selected_label]:
-            mask = df[selected_label] == cls
-            fig_kwargs = {var: df[var][mask] for var in fig_vars}
-            fig.add_trace(scatter(
-                name=str(all_labels[selected_label]['classes'][cls]),
+        if selected_label == 'time':
+
+            global_time_min = df1['time_values'].min()
+            global_time_max = df1['time_values'].max()
+            norm = Normalize(vmin=global_time_min, vmax=global_time_max)
+            fig_kwargs = {var: df[var] for var in fig_vars}
+
+            custom_cmap = LinearSegmentedColormap.from_list(
+                'CustomRdBu',
+                [(0, 'black'), (1, 'red')]
+            )
+
+            n_colors = 256
+            cmap_values = np.linspace(0, 1, n_colors)
+            rgb_colors = [custom_cmap(value)[:3] for value in cmap_values]
+            plotly_colorscale = [
+                [val, f"rgb({int(r*255)}, {int(g*255)}, {int(b*255)})"]
+                for val, (r, g, b) in zip(cmap_values, rgb_colors)
+            ]
+
+            fig.add_trace(go.Scatter3d(
                 mode='markers',
+                name='Time Gradient',
                 marker=dict(
                     size=2,
+                    color=df1['time_values'].values,
+                    colorscale=plotly_colorscale,
+                    colorbar=dict(
+                        title='Time',
+                        tickvals=[global_time_min, global_time_max],
+                        ticktext=[global_time_min, global_time_max]
+                    ),
+                    cmin=global_time_min,
+                    cmax=global_time_max,
                 ),
                 **fig_kwargs
             ))
+
+        else:
+            for cls in classes[selected_label]:
+                mask = df[selected_label] == cls
+                fig_kwargs = {var: df[var][mask] for var in fig_vars}
+
+                global label_color_map
+
+                label_color = get_color_for_label(cls)
+
+                fig.add_trace(scatter(
+                    name=str(all_labels[selected_label]['classes'][cls]),
+                    mode='markers',
+                    marker=dict(
+                        size=2,
+                        color=f'rgba({label_color[0]*255}, {label_color[1]*255}, {label_color[2]*255}, 1)'
+                    ),
+                    **fig_kwargs
+                ))
 
         legend=dict(
             x=0,
@@ -300,7 +372,6 @@ def main(argv=None):
 
     args = parser.parse_args(argv)
 
-    #app = build_app(args.npz, subsample=args.subsample, stratify_label=args.label)
     app = build_app(args.npz, subsample=args.subsample)
 
     app.run(debug=not args.prod, host='0.0.0.0', port=args.port)

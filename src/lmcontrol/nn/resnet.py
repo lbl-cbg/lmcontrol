@@ -3,15 +3,11 @@ from typing import Any, Callable, List, Optional, Type, Union
 
 from torchvision.utils import _log_api_usage_once
 from torchvision.models.resnet import Bottleneck, BasicBlock, conv1x1, conv3x3
-from torchvision.models._utils import _ovewrite_named_param
-from torchvision.models._api import register_model, Weights, WeightsEnum
 
 import torch
 import torch.nn as nn
 from torch import Tensor
 
-from torchvision.models._meta import _IMAGENET_CATEGORIES
-from torchvision.models._utils import _ovewrite_named_param, handle_legacy_interface
 
 class ResNet(nn.Module):
     def __init__(
@@ -69,9 +65,10 @@ class ResNet(nn.Module):
 
 
         idx = max(i for i in range(len(layers)) if layers[i] != 0)
-        n_features = planes[idx] * expansion[idx]
+        self.n_features = planes[idx] * expansion[idx]
 
-        self.fc = nn.Linear(n_features, num_outputs)
+        if not self.return_embeddings:
+            self.fc = nn.Linear(self.n_features, num_outputs)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -150,10 +147,8 @@ class ResNet(nn.Module):
 
         x = self.avgpool(x)
         x = torch.flatten(x, 1)
-
         if not self.return_embeddings:
             x = self.fc(x)
-
         return x
 
     def forward(self, x: Tensor) -> Tensor:

@@ -64,8 +64,9 @@ def main(argv=None):
 
     metric = 'euclidean'
     if len(args.npzs) == 1 and 'predictions' in np.load(args.npzs[0]).files:
-        npz = np.load(args.npzs[0])
+        npz = np.load(args.npzs[0], allow_pickle=True)
         data = npz['predictions']
+        metadata = npz['metadata']
         kwargs = dict()
         for k in npz.files:
             if '_labels' in k or '_classes' in k:
@@ -85,7 +86,7 @@ def main(argv=None):
             kwargs['time_classes'] = time_classes.astype(int)
             kwargs['time_classes'] = kwargs['time_classes'].astype(str)
     else:
-        images, metadata, embedding = load_npzs(args.npzs, logger)
+        masks, images, metadata, embedding = load_npzs(args.npzs, logger)
         kwargs = prepare_labels(metadata)
         data = embedding
         if args.masks:
@@ -96,9 +97,9 @@ def main(argv=None):
     emb = compute_embedding(data, logger, metric=metric, two_d=args.two_dim, center_images=args.center)
 
     logger.info(f"Saving embeddings, images, and metadata to {args.out_npz}", )
-    np.savez(args.out_npz, images=images, embedding=emb, **kwargs)
+    np.savez(args.out_npz, images=images, embedding=emb, metadata=metadata, **kwargs)
 
- 
+
 if __name__ == "__main__":
     main()
 
