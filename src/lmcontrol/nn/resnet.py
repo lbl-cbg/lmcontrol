@@ -67,8 +67,7 @@ class ResNet(nn.Module):
         idx = max(i for i in range(len(layers)) if layers[i] != 0)
         self.n_features = planes[idx] * expansion[idx]
 
-        if not self.return_embeddings:
-            self.fc = nn.Linear(self.n_features, num_outputs)
+        self.fc = nn.Linear(self.n_features, num_outputs)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
