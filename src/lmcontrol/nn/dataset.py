@@ -71,7 +71,7 @@ class LMDataset(Dataset):
     def is_regression(cls, label):
         return label in cls.__regression_labels
 
-    def __init__(self, npzs, label_classes=None, use_masks=False, return_labels=False, logger=None, transform=None, label_type=None, n_samples=None, split=None, val_size=None, seed=None):
+    def __init__(self, npzs, label_classes=None, use_masks=False, return_labels=False, logger=None, transform=None, label_type=None, n_samples=None, return_embeddings=None, split=None, val_size=None, seed=None):
         """
         Args:
             npzs (array-like)       : A list or tuple of paths to NPZ files containing cropped images
@@ -138,7 +138,7 @@ class LMDataset(Dataset):
             train_indices, val_indices = train_test_split(
                 indices, test_size=val_size, random_state=seed
             )
-
+        
         if split == 'train':
             self.data = self.data[train_indices]
             if self.labels is not None:
