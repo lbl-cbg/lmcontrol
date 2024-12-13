@@ -41,6 +41,8 @@ dependencies = [
     "Pillow",
     "pandas",
     "numba",
+    "optuna",
+    "wandb",
 ]
 
 dynamic = ["version"]

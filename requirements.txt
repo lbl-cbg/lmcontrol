@@ -13,3 +13,6 @@ lightly
 Pillow
 pandas
 numba
+optuna
+wandb
+optuna-integration[pytorch_lightning]
