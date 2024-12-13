@@ -34,7 +34,7 @@ def load_npzs(npzs, logger=None, n_samples=None, label_type=None):
             paths.append(npz['paths'][indices])
         else:                                                   # dont take a subset
             if n_samples is not None and n_samples > total_samples:
-                warnings.warn(f"{n_samples} is more samples than found in {npz_path}. Will use all samples")
+                logger.warn(f"{n_samples} is more samples than found in {npz_path}. Will use all samples")
             if 'masks' in npz:
                 masks.append(npz['masks'])
             images.append(npz['images'])

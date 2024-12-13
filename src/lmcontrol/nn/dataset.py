@@ -64,6 +64,16 @@ class Norm(T._transform.Transform):
 
 
 class LMDataset(Dataset):
+    """
+
+    Properties:
+        data (Tensor)                          : images
+        sample_labels (list of Tensors)        : labels for each sample
+        paths (tuple)                          : original path of each image
+        transform (Transform)                  : transform to apply before returning images
+        label (list)                           : a list of one or more labels to use for supervised learning
+
+    """
 
     __regression_labels = {'time'}
 
@@ -71,10 +81,22 @@ class LMDataset(Dataset):
     def is_regression(cls, label):
         return label in cls.__regression_labels
 
-    def __init__(self, npzs, label_classes=None, use_masks=False, return_labels=False, logger=None, transform=None, label_type=None, n_samples=None, return_embeddings=None, split=None, val_size=None, seed=None):
+    def __init__(self, npzs, label_classes=None, use_masks=False, return_labels=False, logger=None,
+                 transform=None, label=None, n_samples=None, split=None, val_size=None, seed=None):
         """
         Args:
-            npzs (array-like)       : A list or tuple of paths to NPZ files containing cropped images
+            npzs (array-like)           : A list or tuple of paths to NPZ files containing cropped images
+            label_classes (dict)        : a dictionary of classes for each label
+            use_masks (bool)            : whether or not to use masks instead of images
+            return_labels (bool)        : whether or not to return labels for each data point
+            logger (Logger)             : the logger to use when loading data
+            transform (Transform)       : the transform to apply to each image
+            label (str, list, tuple)    : the label(s) to return when getting a sample
+            n_samples (int)             : the number of samples to load from each file
+            split (str)                 : a string indication which split to use ("train" or "val")
+            val_size (float)            : fraction of data to use for validation
+            seed (int)                  : the RNG seed to use for training/validation split
+
         """
         if not isinstance(npzs, (list, tuple, np.ndarray, torch.Tensor)):
             raise ValueError(f"Got unexpected type ({type(npzs)}) for argument 'npzs'. Must be an array-like")
@@ -82,7 +104,7 @@ class LMDataset(Dataset):
             raise ValueError("Got empty array-like for argument 'npzs'")
         logger = logger or get_logger('warning')
 
-        masks, images, paths, metadata = load_npzs(npzs, logger, n_samples, label_type)
+        masks, images, paths, metadata = load_npzs(npzs, logger, n_samples, label)
         if use_masks:
             self.data = masks
         else:
@@ -91,32 +113,27 @@ class LMDataset(Dataset):
         self.paths = tuple(paths)
         self.transform = transform
 
-        if not isinstance(label_type, (tuple, list)):
-            label_type = [label_type]
+        if not isinstance(label, (tuple, list)):
+            label = [label]
 
-        self.labels = None
-        self.label_classes = label_classes
-        self.label_type = None
+        self.sample_labels = None
+        # self.label_classes is set up so that we can specify label_classes or compute them on the fly.
+        # We want to specify them after they have been computed to ensure the same label classes are
+        # used across splits (e.g. training, validation, test sets)
+        self.label_classes = label_classes or dict()
+        self.label = label
 
         if return_labels:
-            tmp = []
-            self.label_type = []
-            self.label_classes = {}
-            for k in label_type:
-                self.label_type.append(k)
-
+            self.sample_labels = []
+            for k in self.label:
                 if self.is_regression(k):
                     labels = torch.from_numpy(encode_labels(metadata[k], 'regression'))
                     self.label_classes[k] = None
                 else:
-
                     labels_np, classes = encode_labels(metadata[k], 'classification', classes=self.label_classes.get(k), return_classes=True)
                     labels = torch.from_numpy(labels_np)
                     self.label_classes[k] = classes
-
-                tmp.append(labels)
-
-            self.labels = tmp
+                self.sample_labels.append(labels)
 
         self.metadata = metadata
 
@@ -127,8 +144,8 @@ class LMDataset(Dataset):
         num_samples = len(self.data)
         indices = np.arange(num_samples)
 
-        if self.labels is not None:
-            stratify_label = np.stack([label.numpy() for label in self.labels], axis=1)
+        if self.sample_labels is not None:
+            stratify_label = np.stack([label.numpy() for label in self.sample_labels], axis=1)
             composite_label = [tuple(row) for row in stratify_label]
 
             train_indices, val_indices = train_test_split(
@@ -138,25 +155,24 @@ class LMDataset(Dataset):
             train_indices, val_indices = train_test_split(
                 indices, test_size=val_size, random_state=seed
             )
-        
+
         if split == 'train':
             self.data = self.data[train_indices]
-            if self.labels is not None:
-                self.labels = [label[train_indices] for label in self.labels]
-        elif split == 'validate':
+            if self.sample_labels is not None:
+                self.sample_labels = [label[train_indices] for label in self.sample_labels]
+        elif split.startswith('val'):
             self.data = self.data[val_indices]
-            if self.labels is not None:
-                self.labels = [label[val_indices] for label in self.labels]
+            if self.sample_labels is not None:
+                self.sample_labels = [label[val_indices] for label in self.sample_labels]
 
     def __getitem__(self, i):
         ret = self.data[i]
         if self.transform is not None:
             ret = self.transform(ret)
-        if self.labels is None:
+        if self.sample_labels is None:
             return ret
         else:
-            # length of self.labels is same as that of label_types
-            ret_tmp = [self.labels[j][i] for j in range(len(self.labels))]
+            ret_tmp = [self.sample_labels[j][i] for j in range(len(self.sample_labels))]
             return ret, tuple(ret_tmp)
 
     def __len__(self):
