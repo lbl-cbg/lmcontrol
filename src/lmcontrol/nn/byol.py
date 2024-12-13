@@ -26,7 +26,8 @@ from optuna.integration import PyTorchLightningPruningCallback
 
 from ..utils import get_logger
 from .dataset import LMDataset, get_transforms as _get_transforms
-from lmcontrol.nn.resnet import ResNet, BasicBlock, Bottleneck
+from .resnet import ResNet, BasicBlock, Bottleneck
+from .utils import get_loaders
 
 
 class BYOL(L.LightningModule):
@@ -94,24 +95,6 @@ class BYOL(L.LightningModule):
 
     def configure_optimizers(self):
         return torch.optim.SGD(self.parameters(), lr=self.lr)
-
-
-def get_block(block_type):
-    return {
-        'BasicBlock': BasicBlock,
-        'Bottleneck': Bottleneck
-    }[block_type]
-
-
-def get_planes(plane_cmd):
-    p = int(plane_cmd)
-    return [2**p, 2**(p+1), 2**(p+2), 2**(p+3)]
-
-
-def get_layers(layers_cmd):
-    l = int(layers_cmd)
-    layers = [1 if i < l else 0 for i in range(4)]
-    return layers
 
 
 def _get_trainer(args, trial=None):
@@ -198,32 +181,11 @@ def train(argv=None):
             view_2_transform=_get_transforms('float', 'norm', 'crop', 'rgb'),
     )
 
-    tdset_kwargs = dict(n_samples=args.n_samples, logger=logger, return_labels=False)
-    vdset_kwargs = tdset_kwargs.copy()
 
-    if args.val_frac:
-        train_files = args.training
-        val_files = args.training
-        common = dict(val_size=args.val_frac, seed=args.seed)
-        tdset_kwargs.update(dict(split='train', **common))
-        vdset_kwargs.update(dict(split='validate', **common))
-    elif args.validation:
-        train_files = args.training
-        val_files = args.validation
-    else:
-        print("You must specify --validation or --val_frac", file=sys.stderr)
-        exit(1)
-
-    logger.info(f"Loading training data: {len(train_files)} files")
-    train_dataset = LMDataset(train_files, transform=train_transform, **tdset_kwargs)
-
-    logger.info(f"Loading validation data: {len(val_files)} files")
-    val_dataset = LMDataset(val_files, transform=val_transform, **vdset_kwargs)
-
-    num_workers = 0 if args.debug else 2  # I changed this from 4 to 2
-
-    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, drop_last=True, num_workers=num_workers)
-    val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, drop_last=True, num_workers=num_workers)
+    train_loader, val_loader = get_loaders(args,
+                                           train_tfm=train_transform,
+                                           val_tfm=val_transform,
+                                           return_labels=False)
 
     model = BYOL()
 
@@ -245,10 +207,8 @@ def predict(argv=None):
     logger = get_logger('info')
     transform = _get_transforms('float', 'norm', 'crop', 'rgb')
 
-    test_files = args.prediction
-
-    logger.info(f"Loading inference data: {len(test_files)} files")
-    test_dataset = LMDataset(test_files, transform=transform, logger=logger, return_labels=False, n_samples=args.n_samples)
+    logger.info(f"Loading inference data: {len(args.prediction)} files")
+    test_dataset = LMDataset(args.prediction, transform=transform, logger=logger, return_labels=False, n_samples=args.n_samples)
 
     test_dl = DataLoader(test_dataset, batch_size=512, shuffle=False, drop_last=False, num_workers=3)
 

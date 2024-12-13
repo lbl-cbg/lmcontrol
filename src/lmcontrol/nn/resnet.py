@@ -152,3 +152,27 @@ class ResNet(nn.Module):
 
     def forward(self, x: Tensor) -> Tensor:
         return self._forward_impl(x)
+
+
+def get_block(block_type):
+    return {
+        'BasicBlock': BasicBlock,
+        'Bottleneck': Bottleneck
+    }[block_type]
+
+
+def get_planes(plane_cmd):
+    p = int(plane_cmd)
+    return [2**p, 2**(p+1), 2**(p+2), 2**(p+3)]
+
+
+def get_layers(layers_cmd):
+    l = int(layers_cmd)
+    layers = [1 if i < l else 0 for i in range(4)]
+    return layers
+
+
+def add_args(parser):
+    parser.add_argument("--block", type=get_block, choices=['BasicBlock', 'Bottleneck'], help="type of block to use in the model", default='Bottleneck')
+    parser.add_argument("--planes", type=get_planes, choices=['3', '4'], help="list of number of planes for each layer", default='4')
+    parser.add_argument("--layers", type=get_layers, choices=['1', '2', '3', '4'], help="list of number of layers in each stage", default='4')
