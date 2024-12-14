@@ -15,6 +15,10 @@ class Command:
 def main():
 
     command_dict = {
+        'Data preparation': {
+            'make-spec': Command('merge.make_spec', 'Make data table specification'),
+            'reformat': Command('merge.main', 'Merge data into monolithic HDMF file'),
+        },
         'Segmentation': {
             'crop': Command('segment.main', 'Crop light microscopy images to bounding box around single cell'),
             'add-md': Command('segment.add_metadata', 'Add metadata to cropped image package'),

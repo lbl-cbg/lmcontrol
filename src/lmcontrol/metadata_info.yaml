@@ -1,0 +1,18 @@
+time:
+  description: the age of the sample from which the image was taken
+  enum: false
+sample:
+  description: the ID of the sample from which the image was taken
+  enum: true
+ht:
+  description: the bioreactor that the sample from which the image was taken
+  enum: true
+condition:
+  description: the experimental condition of the bioreactor
+  enum: true
+feed:
+  description: the feed used in the bioreactor
+  enum: true
+starting_media:
+  description: the starting media of the bioreactor
+  enum: true
