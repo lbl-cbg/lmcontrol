@@ -19,7 +19,7 @@ def load_npzs(npzs, logger=None, n_samples=None, label_type=None):
     logger = logger or get_logger('warning')
 
     for npz_path in npzs:
-        logger.debug(f"Reading {npz_path}")
+        logger.info(f"Reading {npz_path}")
         npz = np.load(npz_path, mmap_mode='r', allow_pickle=True)
         if 'masks' in npz:
             total_samples = len(npz['masks'])
@@ -42,7 +42,7 @@ def load_npzs(npzs, logger=None, n_samples=None, label_type=None):
                 paths.append(npz['paths'])
 
         md_keys = set(npz.keys()) - {'paths', 'masks', 'images'}
-        logger.debug(f"Found the following keys in {npz_path}: {' '.join(sorted(md_keys))}")
+        logger.info(f"Found the following keys in {npz_path}: {' '.join(sorted(md_keys))}")
 
         for k in sorted(md_keys):
             if npz[k].ndim == 0:

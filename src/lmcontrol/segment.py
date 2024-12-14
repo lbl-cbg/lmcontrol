@@ -150,7 +150,7 @@ def trim_box(mask, img, size=None, pad=True):
             if h_d > 0:
                 padding_ltrb[0][0] = h_d // 2
                 padding_ltrb[0][1] = h_d // 2 + int(h_d % 2)
-            
+
             mean_value = np.mean(ret)
             ret = np.pad(ret, padding_ltrb, mode='constant', constant_values=mean_value)
             Xn, Xx, Yn, Yx = _adjust_bounds(0, ret.shape[0], 0, ret.shape[1], size)
@@ -194,7 +194,7 @@ def add_metadata(argv=None):
     parser.add_argument("npz", type=str, help='Path to the NPZ file')
     parser.add_argument("metadata", help="a comma-separated list of key=value pairs. e.g. ht=1,time=S4", default="", type=metadata)
     args = parser.parse_args(argv)
-    
+
     npz = np.load(args.npz)
     data = dict(npz)
     data.update(args.metadata)
@@ -205,34 +205,34 @@ def crop_center(image, crop_size, pad=True):
     """
     Crop the center of the given image to the specified size.
     If the image is smaller than the desired size, it will be padded with zeros.
-    
+
     Args:
         image (array): The image to crop.
         crop_size (tuple): The target size (height, width) to crop the image to.
         pad (bool): If True, pad the image with zeros if it's smaller than the crop_size.
-    
+
     Returns:
         np.array: The cropped (and possibly padded) image.
     """
     h, w = image.shape
     crop_h, crop_w = crop_size
-    
+
     start_h = max(0, (h - crop_h) // 2)
     start_w = max(0, (w - crop_w) // 2)
     end_h = start_h + crop_h
     end_w = start_w + crop_w
-    
+
     if pad:
         mean_value = np.mean(image)
-        
+
         padding_h = max(0, crop_h - h)
         padding_w = max(0, crop_w - w)
-        
-        padded_image = np.pad(image, 
-                              ((padding_h // 2, padding_h - padding_h // 2), 
+
+        padded_image = np.pad(image,
+                              ((padding_h // 2, padding_h - padding_h // 2),
                                (padding_w // 2, padding_w - padding_w // 2)),
                               mode='constant', constant_values=mean_value)
-        
+
         h, w = padded_image.shape
         start_h = (h - crop_h) // 2
         start_w = (w - crop_w) // 2
@@ -240,7 +240,7 @@ def crop_center(image, crop_size, pad=True):
         end_w = start_w + crop_w
 
         return padded_image[start_h:end_h, start_w:end_w]
-    
+
     return image[start_h:end_h, start_w:end_w]
 
 
@@ -286,7 +286,7 @@ def main(argv=None):
     parser.add_argument("-m", "--metadata", help="a comma-separated list of key=value pairs. e.g. ht=1,time=S4", default="", type=metadata)
     parser.add_argument('-cc', '--crop_center', action='store_true', default=False,
                         help='the flag to crop the center part of image in case the image is unsegmentable')
-        
+
     args = parser.parse_args(argv)
 
     logger = get_logger()
@@ -340,17 +340,17 @@ def main(argv=None):
                 if not dir_exists:
                     os.makedirs(os.path.dirname(target), exist_ok=True)
                     dir_exists = True
-                sio.imsave(target, image)             
+                sio.imsave(target, image)
             if args.crop_center:
                 center_cropped_image = crop_center(image, crop_size=args.crop, pad=args.pad)
                 seg_images.append(center_cropped_image)
-                seg_masks.append(np.zeros_like(center_cropped_image))  
-                paths.append(tif)  
+                seg_masks.append(np.zeros_like(center_cropped_image))
+                paths.append(tif)
             continue
 
     logger.info(f"Done segmenting images. {n_unseg} ({100 * n_unseg / len(image_paths):.1f}%) images were unsegmentable")
 
-    
+
     # [(i, img.shape) for i, img in enumerate(seg_images) if img.shape != (96, 96)]
     seg_images = np.array(seg_images)
     seg_masks = np.array(seg_masks)
