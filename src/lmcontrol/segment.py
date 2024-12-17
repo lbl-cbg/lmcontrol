@@ -352,8 +352,8 @@ def main(argv=None):
 
 
     # [(i, img.shape) for i, img in enumerate(seg_images) if img.shape != (96, 96)]
-    seg_images = np.array(seg_images)
-    seg_masks = np.array(seg_masks)
+    seg_images = np.array(seg_images, dtype=np.uint8)
+    seg_masks = np.array(seg_masks, dtype=np.uint8)
     paths = np.array(paths)
 
     os.makedirs(args.output_dir, exist_ok=True)
