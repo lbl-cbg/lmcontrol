@@ -6,7 +6,7 @@ import torch
 from torch.utils.data import Dataset
 import torchvision.transforms.v2 as T
 from sklearn.model_selection import train_test_split
-
+from hdmf.common import get_hdf5io
 
 from ..data_utils import encode_labels, load_npzs
 from ..utils import get_logger
@@ -77,15 +77,17 @@ class LMDataset(Dataset):
 
     __regression_labels = {'time'}
 
+    split_vals = {'train': 0, 'validation': 1, 'test': 2}
+
     @classmethod
     def is_regression(cls, label):
         return label in cls.__regression_labels
 
-    def __init__(self, npzs, label_classes=None, use_masks=False, return_labels=False, logger=None,
-                 transform=None, label=None, n_samples=None, split=None, val_size=None, seed=None):
+    def __init__(self, path, label_classes=None, use_masks=False, return_labels=False, logger=None, transform=None,
+                 label=None, n_samples=None, split=None, val_size=None):
         """
         Args:
-            npzs (array-like)           : A list or tuple of paths to NPZ files containing cropped images
+            path (str)                  : path to the HDMF DynamicTable file
             label_classes (dict)        : a dictionary of classes for each label
             use_masks (bool)            : whether or not to use masks instead of images
             return_labels (bool)        : whether or not to return labels for each data point
@@ -95,92 +97,120 @@ class LMDataset(Dataset):
             n_samples (int)             : the number of samples to load from each file
             split (str)                 : a string indication which split to use ("train" or "val")
             val_size (float)            : fraction of data to use for validation
-            seed (int)                  : the RNG seed to use for training/validation split
 
         """
-        if not isinstance(npzs, (list, tuple, np.ndarray, torch.Tensor)):
-            raise ValueError(f"Got unexpected type ({type(npzs)}) for argument 'npzs'. Must be an array-like")
-        elif len(npzs) == 0:
-            raise ValueError("Got empty array-like for argument 'npzs'")
-        logger = logger or get_logger('warning')
+        self.logger = logger or get_logger('warning')
 
-        masks, images, paths, metadata = load_npzs(npzs, logger, n_samples, label)
-        if use_masks:
-            self.data = masks
-        else:
-            self.data = images
-        self.data = torch.from_numpy(self.data)[:, None, :, :]
-        self.paths = tuple(paths)
-        self.transform = transform
+        self.path = path
+
+        self.use_masks = use_masks
+        self.return_labels = return_labels
 
         if not isinstance(label, (tuple, list)):
             label = [label]
 
+        self.label = label
         self.sample_labels = None
+
+        self.transform = transform
+
+        self.split = split
+        self.split_mask = None
+        self.subset = None
+
+        self.io = None
+        self.table = None
+
+        self.open()
+        self.__len = len(self.table)
+        self.close()
+
         # self.label_classes is set up so that we can specify label_classes or compute them on the fly.
         # We want to specify them after they have been computed to ensure the same label classes are
         # used across splits (e.g. training, validation, test sets)
         self.label_classes = label_classes or dict()
-        self.label = label
 
-        if return_labels:
-            self.sample_labels = []
-            for k in self.label:
-                if self.is_regression(k):
-                    labels = torch.from_numpy(encode_labels(metadata[k], 'regression'))
-                    self.label_classes[k] = None
-                else:
-                    labels_np, classes = encode_labels(metadata[k], 'classification', classes=self.label_classes.get(k), return_classes=True)
-                    labels = torch.from_numpy(labels_np)
-                    self.label_classes[k] = classes
-                self.sample_labels.append(labels)
+    def open(self, worker_id=None):
+        """Open file for reading if it is not currently open"""
+        if self.table is None:
+            self.io = get_hdf5io(self.path, 'r')
+            self.table = self.io.read()
 
-        self.metadata = metadata
+            if self.use_masks:
+                self.data = self.table['masks'].data
+            else:
+                self.data = self.table['images'].data
 
-        if val_size:
-            self._split_data(split, val_size, seed)
+            self.label_classes = dict()
 
-    def _split_data(self, split, val_size, seed):
-        num_samples = len(self.data)
-        indices = np.arange(num_samples)
+            if self.return_labels:
+                self.sample_labels = []
+                for k in self.label:
+                    if isinstance(self.table[k], EnumData):
+                        self.label_classes[k] = self.table[k].elements[:]
+                    else:
+                        self.label_classes[k] = None
+                    self.sample_labels.append(self.table[k].data)
 
-        if self.sample_labels is not None:
-            stratify_label = np.stack([label.numpy() for label in self.sample_labels], axis=1)
-            composite_label = [tuple(row) for row in stratify_label]
+    def close(self):
+        self.io.close()
+        self.table = None
+        self.io = None
+        self.data = None
 
-            train_indices, val_indices = train_test_split(
-                indices, test_size=val_size, random_state=seed, stratify=composite_label
-            )
-        else:
-            train_indices, val_indices = train_test_split(
-                indices, test_size=val_size, random_state=seed
-            )
+    def set_random_split(self, val_frac, test_frac, seed=None):
+        if (val_frac + test_frac) >= 1.0:
+            raise ValueError("val and test should sum to less 1.0, otherwise there will be nothing left to train with!")
 
-        if split == 'train':
-            self.data = self.data[train_indices]
-            if self.sample_labels is not None:
-                self.sample_labels = [label[train_indices] for label in self.sample_labels]
-        elif split.startswith('val'):
-            self.data = self.data[val_indices]
-            if self.sample_labels is not None:
-                self.sample_labels = [label[val_indices] for label in self.sample_labels]
+        # open the file if we need to, but make sure we close it if it was closed to begin with
+        close = self.table is None
+        if close:
+            self.open()
+
+        n = len(self.table)
+        val_len = int(n * val_frac)
+        test_len = int(n * test_frac)
+        train_len = n - val_len - test_len
+
+        rng = torch.Generator()
+        if seed is not None:
+            rng.manual_seed(seed)
+
+        perm = torch.randperm(n, rng)
+
+        split = torch.zeros(n, dtype=torch.uint8) + self.split_vals['train']
+        split[train_len:train_len+val_len] = self.split_vals['validation']
+        split[train_len+val_len:] = self.split_vals['test']
+
+        self.set_split(split)
+
+        if close:
+            self.close()
+
+    def set_split(self, split_mask):
+        self.split_mask = split_mask
+        self.subset = torch.where(self.split_mask == self.split_vals[self.split])
+        self.__len = len(self.subset)
 
     def __getitem__(self, i):
-        ret = self.data[i]
+        i = i if self.subset is None else self.subset[i]
+        ret = torch.as_tensor(self.data[i]).unsqueeze(0)
         if self.transform is not None:
             ret = self.transform(ret)
         if self.sample_labels is None:
             return ret
         else:
-            ret_tmp = [self.sample_labels[j][i] for j in range(len(self.sample_labels))]
+            ret_tmp = [torch.as_tensor(self.sample_labels[j][i])
+                       for j in range(len(self.sample_labels))]
             return ret, tuple(ret_tmp)
 
     def __len__(self):
-        return len(self.data)
+        return self.__len
 
     @staticmethod
     def index_to_filename(dataset, i):
         return dataset.paths[i]
+
 
 def extract_labels_from_filename(filename):
     """Extract labels from filename in the format Sx_HTY_randomtext.npz"""
@@ -189,6 +219,13 @@ def extract_labels_from_filename(filename):
     y_label = parts[1][2:]  # Extract Y from HTY
     return x_label, y_label
 
+
+def to_rgb(x):
+    return x.repeat(3, 1, 1) if x.ndim == 3 else x.repeat(1, 3, 1, 1)
+
+def to_float(x):
+    return x.to(torch.float32)
+
 TRANSFORMS = {
         'blur': T.GaussianBlur(3, sigma=(0.01, 1.0)),
         'rotate': T.RandomRotation(180),
@@ -196,8 +233,8 @@ TRANSFORMS = {
         'hflip': T.RandomHorizontalFlip(0.5),
         'vflip': T.RandomVerticalFlip(0.5),
         'noise': GaussianNoise(sigma=(10, 12)),
-        'rgb': T.Lambda(lambda x: x.repeat(3, 1, 1) if x.ndim == 3 else x.repeat(1, 3, 1, 1)),
-        'float': T.Lambda(lambda x: x.to(torch.float32)),
+        'rgb': T.Lambda(to_rgb),
+        'float': T.Lambda(to_float),
         'norm': Norm(),
 }
 

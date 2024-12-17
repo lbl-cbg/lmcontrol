@@ -24,9 +24,9 @@ from lightly.transforms.byol_transform import BYOLTransform
 from lightly.utils.scheduler import cosine_schedule
 from optuna.integration import PyTorchLightningPruningCallback
 
-from ..utils import get_logger
+from ..utils import get_logger, parse_seed
 from .dataset import LMDataset, get_transforms as _get_transforms
-from .resnet import ResNet, BasicBlock, Bottleneck
+from .resnet import ResNet, Bottleneck, get_block, get_planes, get_layers
 from .utils import get_loaders
 
 
@@ -42,6 +42,7 @@ class BYOL(L.LightningModule):
     def __init__(self, lr=0.06, planes=[8, 16, 32, 64], layers=[1, 1, 1, 1], block=Bottleneck):
         super().__init__()
 
+        self.lr = lr
         self.backbone = ResNet(block=block, layers=layers, planes=planes, num_outputs=0, return_embeddings=True)
         self.projection_head = BYOLProjectionHead(self.backbone.n_features, 1024, 256)
         self.prediction_head = BYOLPredictionHead(256, 1024, 256)
@@ -143,20 +144,21 @@ def _get_trainer(args, trial=None):
 
 def train(argv=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument("--training", type=str, nargs='+', required=True, help="directories containing training data")
+    parser.add_argument("input", help="HDMF input file")
 
     grp = parser.add_mutually_exclusive_group()
     grp.add_argument("--validation", type=str, nargs='+', help="directories containing validation data")
     grp.add_argument("--val_frac", type=float, default=None, help="Part of data to use for training (between 0 and 1)")
 
-    parser.add_argument("--seed", type=int, help="seed for dataset splits")
+    parser.add_argument("--split-seed", type=parse_seed, help="seed for dataset splits", default=None)
+
     parser.add_argument("-c","--checkpoint", type=str, help="path to the model checkpoint file to use for inference")
     parser.add_argument("-e", "--epochs", type=int, help="the number of epochs to run for", default=10)
     parser.add_argument("-d", "--debug", action='store_true', help="run with a small dataset", default=False)
     parser.add_argument("-o", "--outdir", type=str, help="the directory to save output to", default='.')
     parser.add_argument("-n", "--n_samples", type=int, help="number of samples to use from each NPZ", default=None)
     parser.add_argument("--early_stopping", action='store_true', help="enable early stopping", default=False)
-    parser.add_argument("--wandb", action='store_false', default=True, help="provide this flag to stop wandb")
+    parser.add_argument("--wandb", action='store_true', default=False, help="provide this flag to stop wandb")
     parser.add_argument("--lr", type=float, help="learning rate", default=0.001)
     parser.add_argument("--batch_size", type=int, help="batch size for training and validation", default=32)
     parser.add_argument("--block", type=get_block, choices=['BasicBlock', 'Bottleneck'], help="type of block to use in the model", default='Bottleneck')
@@ -165,7 +167,7 @@ def train(argv=None):
     parser.add_argument("--accelerator", type=str, help="type of accelerator for trainer", default="gpu")
     parser.add_argument("--strategy", type=str, help="type of strategy for trainer", default="auto")
     parser.add_argument("--devices", type=int, help="number of devices for trainer", default=1)
-    parser.add_argument("--num_nodes", type=int, help="number of nodes for trainer", default=4)
+    parser.add_argument("--num_nodes", type=int, help="number of nodes for trainer", default=1)
 
     args = parser.parse_args(argv)
 
@@ -181,14 +183,11 @@ def train(argv=None):
             view_2_transform=_get_transforms('float', 'norm', 'crop', 'rgb'),
     )
 
-
     train_loader, val_loader = get_loaders(args,
                                            train_tfm=train_transform,
                                            val_tfm=val_transform,
                                            return_labels=False)
-
     model = BYOL()
-
     trainer = _get_trainer(args)
     trainer.fit(model, train_loader, val_loader)
 

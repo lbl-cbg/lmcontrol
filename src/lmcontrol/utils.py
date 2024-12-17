@@ -28,3 +28,20 @@ def get_metadata_info():
     with open(file_path, 'r') as file:
         data = yaml.safe_load(file)
     return data
+
+
+def get_seed():
+    return int(datetime.now().timestamp()*1000000) % (2**32 -1)
+
+
+def parse_seed(string):
+    if string:
+        try:
+            i = int(string)
+            if i > 2**32 - 1:
+                raise ValueError(string)
+            return i
+        except :
+            raise argparse.ArgumentTypeError(f'{string} is not a valid seed')
+    else:
+        return get_seed()
