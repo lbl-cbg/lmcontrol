@@ -16,3 +16,6 @@ numba
 optuna
 wandb
 optuna-integration[pytorch_lightning]
+hdmf
+opencv-python
+imagecodecs
