@@ -134,8 +134,8 @@ def trim_box(mask, img, size=None, pad=True):
                 Xn, Xx = Xn - (Xx - mask.shape[0]), mask.shape[0]
             if Yn < 0:
                 Yn, Yx = 0, Yx - Yn
-            elif Yx > mask.shape[0]:
-                Yn, Yx = Yn - (Yx - mask.shape[0]), mask.shape[0]
+            elif Yx > mask.shape[1]:
+                Yn, Yx = Yn - (Yx - mask.shape[1]), mask.shape[1]
             ret = img[Xn: Xx, Yn: Yx]
         else:
             ret = img[Xn: Xx, Yn: Yx]
@@ -183,6 +183,15 @@ def metadata(string):
     if len(string):
         try:
             ret = {k:v for k, v in (tuple(kv.split("=")) for kv in string.split(","))}
+            for k in list(ret.keys()):
+                v = ret[k]
+                for t in (int, float, str):
+                    try:
+                        v = t(v)
+                        break
+                    except:
+                        v = ret[k]
+                ret[k] = v
         except:
             raise argparse.ArgumentTypeError()
         return ret
