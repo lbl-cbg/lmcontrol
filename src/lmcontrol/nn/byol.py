@@ -3,12 +3,18 @@ import copy
 import glob
 import os
 import sys
+
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning, message=".*ToTensor().*")
+warnings.filterwarnings("ignore", category=UserWarning, message=".*EnumData.*")
+
 import wandb
 
 import lightning as L
 from lightning.pytorch.loggers import WandbLogger, CSVLogger
 from lightning.pytorch.callbacks.early_stopping import EarlyStopping
 from lightning.pytorch.callbacks import ModelCheckpoint
+from lightning.pytorch.strategies import DDPStrategy
 
 import numpy as np
 
@@ -106,19 +112,21 @@ def _get_trainer(args, trial=None):
     targs = dict(num_nodes=args.num_nodes, max_epochs=args.epochs, devices=args.devices,
                  accelerator="gpu" if args.devices > 0 else "cpu", check_val_every_n_epoch=4, callbacks=callbacks)
 
+    if args.devices > 0:
+        torch.set_float32_matmul_precision('medium')
+
     if args.devices > 1:  # If using multiple GPUs, use Distributed Data Parallel (DDP)
-        targs['strategy'] = "ddp"
+        targs['strategy'] = DDPStrategy(find_unused_parameters=True)
 
     # should we use r2 score and val_accuracy for measurement
-    if args.checkpoint:
-        checkpoint_callback = ModelCheckpoint(
-            dirpath=args.checkpoint,
-            filename="checkpoint-{epoch:02d}-{validation_ncs:.4f}",
-            save_top_k=3,
-            monitor="validation_ncs",
-            mode="min"
-        )
-        callbacks.append(checkpoint_callback)
+    checkpoint_callback = ModelCheckpoint(
+        dirpath=args.outdir,
+        filename="checkpoint-{epoch:02d}-{validation_ncs:.4f}",
+        save_top_k=3,
+        monitor="validation_ncs",
+        mode="min"
+    )
+    callbacks.append(checkpoint_callback)
 
     early_stopping_callback = EarlyStopping(
         monitor="validation_ncs",
@@ -129,15 +137,16 @@ def _get_trainer(args, trial=None):
     callbacks.append(early_stopping_callback)
 
 
+    targs['logger'] = CSVLogger(args.outdir)
     if trial is not None :   # if 'trial' is passed in, assume we are using Optuna to do HPO
-        targs['logger'] = CSVLogger(args.outdir, name=args.experiment)
         if args.pruning:
             callbacks.append(PyTorchLightningPruningCallback(trial, monitor="combined_metric"))
 
     else:
         if args.wandb:
-            wandb.init(project="SX_HTY_Run1")
-            targs['logger'] = WandbLogger(project='your_project_name', log_model=True)
+            wandb.init(project="lmcontrol",
+                       config=vars(args))
+            targs['logger'] = WandbLogger(project='lmcontrol', log_model=True)
 
     return L.Trainer(**targs)
 
@@ -150,7 +159,7 @@ def train(argv=None):
     grp.add_argument("--validation", type=str, nargs='+', help="directories containing validation data")
     grp.add_argument("--val_frac", type=float, default=None, help="Part of data to use for training (between 0 and 1)")
 
-    parser.add_argument("--split-seed", type=parse_seed, help="seed for dataset splits", default=None)
+    parser.add_argument("--split-seed", type=parse_seed, help="seed for dataset splits", default='')
 
     parser.add_argument("-c","--checkpoint", type=str, help="path to the model checkpoint file to use for inference")
     parser.add_argument("-e", "--epochs", type=int, help="the number of epochs to run for", default=10)
@@ -166,12 +175,14 @@ def train(argv=None):
     parser.add_argument("--layers", type=get_layers, choices=['1', '2', '3', '4'], help="list of number of layers in each stage", default='4')
     parser.add_argument("--accelerator", type=str, help="type of accelerator for trainer", default="gpu")
     parser.add_argument("--strategy", type=str, help="type of strategy for trainer", default="auto")
-    parser.add_argument("--devices", type=int, help="number of devices for trainer", default=1)
-    parser.add_argument("--num_nodes", type=int, help="number of nodes for trainer", default=1)
+    parser.add_argument("-g", "--devices", type=int, help="number of devices for trainer", default=1)
+    parser.add_argument("-N", "--num_nodes", type=int, help="number of nodes for trainer", default=1)
 
     args = parser.parse_args(argv)
 
     logger = get_logger('info')
+
+    logger.info(args)
 
     train_transform = BYOLTransform(
         view_1_transform=_get_transforms('float', 'norm', 'rotate', 'crop', 'hflip', 'vflip', 'rgb'),

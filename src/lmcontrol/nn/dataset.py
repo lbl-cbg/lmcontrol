@@ -176,7 +176,7 @@ class LMDataset(Dataset):
         if seed is not None:
             rng.manual_seed(seed)
 
-        perm = torch.randperm(n, rng)
+        perm = torch.randperm(n, generator=rng)
 
         split = torch.zeros(n, dtype=torch.uint8) + self.split_vals['train']
         split[train_len:train_len+val_len] = self.split_vals['validation']
@@ -189,7 +189,7 @@ class LMDataset(Dataset):
 
     def set_split(self, split_mask):
         self.split_mask = split_mask
-        self.subset = torch.where(self.split_mask == self.split_vals[self.split])
+        self.subset = torch.where(self.split_mask == self.split_vals[self.split])[0]
         self.__len = len(self.subset)
 
     def __getitem__(self, i):
