@@ -16,3 +16,6 @@ feed:
 starting_media:
   description: the starting media of the bioreactor
   enum: true
+campaign:
+  description: the campaign (a.k.a. experiment) of the bioreactor
+  enum: true
