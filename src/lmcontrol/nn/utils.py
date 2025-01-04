@@ -28,10 +28,11 @@ def get_loaders(args, train_tfm=None, val_tfm=None, return_labels=True, logger=N
         val_dataset.open()
 
     if args.split_seed is not None:
-        train_dataset.set_random_split(args.split_seed, 0.1, 0.1)
-        val_dataset.set_random_split(args.split_seed, 0.1, 0.1)
+        train_dataset.set_random_split(0.1, 0.1, seed=args.split_seed)
+        val_dataset.set_random_split(0.1, 0.1, seed=args.split_seed)
 
-    dl_kwargs = dict(num_workers=0 if args.debug else 2, batch_size=args.batch_size)
+    dl_kwargs = dict(num_workers=0 if args.debug else 3, batch_size=args.batch_size,
+                     multiprocessing_context='spawn', persistent_workers=True)
 
     train_loader = DataLoader(train_dataset, shuffle=True, worker_init_fn=train_dataset.open, **dl_kwargs)
     val_loader = DataLoader(val_dataset, shuffle=False, worker_init_fn=val_dataset.open, **dl_kwargs)
