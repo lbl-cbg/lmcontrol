@@ -217,6 +217,8 @@ def predict(argv=None):
     parser.add_argument("-n", "--n-samples", type=int, help="number of samples to use from each class", default=None)
     parser.add_argument("-b", "--batch-size", type=int, help="batch size for training and validation", default=64)
     parser.add_argument("-g", "--devices", type=int, help="number of devices for trainer", default=1)
+    parser.add_argument("-V", "--add-viz", action='store_true', help="Compute UMAP embedding for visualiztion", default=False)
+    parser.add_argument("-2", "--two-dim", action='store_true', help="Compute 2D UMAP embedding (default is 3D embedding)", default=False)
 
     args = parser.parse_args(argv)
 
@@ -227,7 +229,9 @@ def predict(argv=None):
     loader = get_loaders(args,
                          inference=True,
                          tfm=transform,
-                         return_labels=False)
+                         return_labels=False,
+                         logger=logger)
+
     dataset = loader.dataset
 
 
@@ -252,6 +256,19 @@ def predict(argv=None):
 
     t.add_embedding(predictions,
                     description="ResNet features")
+
+    if args.add_viz:
+        if accelerator == "gpu":
+            from cuml import UMAP
+        else:
+            from umap import UMAP
+        D = 2 if args.two_dim else 3
+        umap = UMAP(n_components=D,
+                    min_dist=0.1, metric='euclidean')
+        logger.info(f"Calculating {D}D embedding for visualization")
+        emb = umap.fit_transform(predictions)
+        t.add_viz_embedding(emb,
+                            description=f"UMAP embedding computed using {str(umap.get_params())}")
 
     with get_hdf5io(args.output, mode='w') as io:
         io.write(t)
