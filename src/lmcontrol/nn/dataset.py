@@ -189,8 +189,9 @@ class LMDataset(Dataset):
 
     def set_split(self, split_mask):
         self.split_mask = split_mask
-        self.subset = torch.where(self.split_mask == self.split_vals[self.split])[0]
-        self.__len = len(self.subset)
+        if self.split is not None:
+            self.subset = torch.where(self.split_mask == self.split_vals[self.split])[0]
+            self.__len = len(self.subset)
 
     def __getitem__(self, i):
         i = i if self.subset is None else self.subset[i]

@@ -18,6 +18,9 @@ from lightning.pytorch.strategies import DDPStrategy
 
 import numpy as np
 
+from hdmf_ai import ResultsTable
+from hdmf.common import get_hdf5io
+
 import torch
 from torch.utils.data import DataLoader
 import torchvision
@@ -169,7 +172,7 @@ def train(argv=None):
     parser.add_argument("--early_stopping", action='store_true', help="enable early stopping", default=False)
     parser.add_argument("--wandb", action='store_true', default=False, help="provide this flag to stop wandb")
     parser.add_argument("--lr", type=float, help="learning rate", default=0.001)
-    parser.add_argument("--batch_size", type=int, help="batch size for training and validation", default=32)
+    parser.add_argument("-b", "--batch-size", type=int, help="batch size for training and validation", default=32)
     parser.add_argument("--block", type=get_block, choices=['BasicBlock', 'Bottleneck'], help="type of block to use in the model", default='Bottleneck')
     parser.add_argument("--planes", type=get_planes, choices=['3', '4'], help="list of number of planes for each layer", default='4')
     parser.add_argument("--layers", type=get_layers, choices=['1', '2', '3', '4'], help="list of number of layers in each stage", default='4')
@@ -205,63 +208,54 @@ def train(argv=None):
 def predict(argv=None):
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("output_npz", type=str, help="the path to save the embeddings to. Saved in NPZ format")
+    parser.add_argument("input", help="HDMF input file")
     parser.add_argument("checkpoint", type=str, help="path to the model checkpoint file to use for inference")
-    parser.add_argument("prediction", type=str, nargs='+', required=True, help="directories containing prediction data")
+    parser.add_argument("output", type=str, help="the HDMF-AI file to save outputs to")
+    parser.add_argument("--split-seed", type=parse_seed, help="seed for dataset splits", default=None)
     parser.add_argument("-d", "--debug", action='store_true', help="run with a small dataset", default=False)
-<<<<<<< Updated upstream
-    parser.add_argument("-p", "--pred-only", action='store_true', default=False, help="only save predictions, otherwise save original image data and labels in output_npz")
-    parser.add_argument("-n", "--n_samples", type=int, help="number of samples to use from each class", default=None)
-=======
     parser.add_argument("-p", "--pred-only", action='store_true', default=False, help="only save predictions, otherwise save original image data and labels in output")
     parser.add_argument("-n", "--n-samples", type=int, help="number of samples to use from each class", default=None)
     parser.add_argument("-b", "--batch-size", type=int, help="batch size for training and validation", default=64)
     parser.add_argument("-g", "--devices", type=int, help="number of devices for trainer", default=1)
     parser.add_argument("-V", "--add-viz", action='store_true', help="Compute UMAP embedding for visualiztion", default=False)
     parser.add_argument("-2", "--two-dim", action='store_true', help="Compute 2D UMAP embedding (default is 3D embedding)", default=False)
->>>>>>> Stashed changes
 
     args = parser.parse_args(argv)
 
     logger = get_logger('info')
     transform = _get_transforms('float', 'norm', 'crop', 'rgb')
 
-    logger.info(f"Loading inference data: {len(args.prediction)} files")
-    test_dataset = LMDataset(args.prediction, transform=transform, logger=logger, return_labels=False, n_samples=args.n_samples)
 
-<<<<<<< Updated upstream
-    test_dl = DataLoader(test_dataset, batch_size=512, shuffle=False, drop_last=False, num_workers=3)
-=======
     loader = get_loaders(args,
                          inference=True,
                          tfm=transform,
                          return_labels=False,
                          logger=logger)
+
     dataset = loader.dataset
 
->>>>>>> Stashed changes
 
     model = BYOL.load_from_checkpoint(args.checkpoint)
+
     accelerator = "gpu" if torch.cuda.is_available() else "cpu"
-    trainer = L.Trainer(devices=1, accelerator=accelerator)
+    trainer = L.Trainer(devices=args.devices, accelerator=accelerator)
 
     logger.info("Running predictions witih Lightning")
-    predictions = trainer.predict(model, test_dl)
+    predictions = trainer.predict(model, loader)
     predictions = torch.cat(predictions).numpy()
-
-    out_data = dict(predictions=predictions)
-
-    if not args.pred_only:
-        dset = test_dataset
-        out_data['images'] = np.asarray(torch.squeeze(dset.data))
-        out_data['metadata'] = {key: np.asarray(dset.metadata[key]) for key in dset.metadata}
 
     logger.info("Saving output")
 
-<<<<<<< Updated upstream
-    np.savez(args.output_npz, **out_data)
-=======
+    t = ResultsTable("byol_all",
+                     description="Embeddings from a ResNet trained with BYOL",
+                     n_samples=len(dataset))
 
+    if dataset.split_mask is not None:
+        t.add_tvt_split(dataset.split_mask.numpy(),
+                        description=f"Generated with torch.randperm, with seed {args.split_seed}")
+
+    t.add_embedding(predictions,
+                    description="ResNet features")
 
     if args.add_viz:
         if accelerator == "gpu":
@@ -276,10 +270,8 @@ def predict(argv=None):
         t.add_viz_embedding(emb,
                             description=f"UMAP embedding computed using {str(umap.get_params())}")
 
-
     with get_hdf5io(args.output, mode='w') as io:
         io.write(t)
->>>>>>> Stashed changes
 
 
 if __name__ == '__main__':
