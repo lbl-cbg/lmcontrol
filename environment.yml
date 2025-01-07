@@ -1,0 +1,39 @@
+name: myenv
+channels:
+  - pytorch
+  - nvidia
+  - defaults
+  - conda-forge
+dependencies:
+  - pytorch
+  - torchvision
+  - torchaudio
+  - pytorch-cuda=12.4
+  - pip
+  - pip:
+    - --extra-index-url=https://pypi.nvidia.com
+    - numpy
+    - scikit-image
+    - scikit-learn
+    - scipy
+    - tqdm
+    - umap-learn
+    - plotly
+    - dash
+    - seaborn
+    - lightning
+    - lightly
+    - Pillow
+    - pandas
+    - numba
+    - optuna
+    - wandb
+    - optuna-integration[pytorch_lightning]
+    - hdmf
+    - opencv-python
+    - imagecodecs
+    - cudf-cu12
+    - dask-cudf-cu12
+    - cuml-cu12
+    - cugraph-cu12
+
