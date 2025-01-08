@@ -23,6 +23,12 @@ from matplotlib.colors import Normalize, LinearSegmentedColormap
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 
+from hdmf_ai import ResultsTable
+from hdmf.common import get_hdf5io
+
+from ..utils import get_metadata_info
+
+metadata_info = get_metadata_info()
 
 # Helper functions
 def np_image_to_base64(im_matrix):
@@ -35,46 +41,36 @@ def np_image_to_base64(im_matrix):
 
 current_selected_label = None
 
-df = classes = dd_options = all_labels = scatter = fig_vars = None
+input_path = df = classes = dd_options = all_labels = scatter = fig_vars = None
+
+def to_int(arr):
+    if np.issubdtype(arr.dtype, np.integer):
+        return arr.astype(int)
+    return arr
 
 def load_data(path, subsample=None, stratify_label=None, **addl_labels):
     global df
-    global df1
     global classes
     global dd_options
     global all_labels
     global scatter
     global fig_vars
 
-    npz = np.load(path, mmap_mode='r', allow_pickle=True)
+    input_io = get_hdf5io(input_path, 'r')
+    dt = input_io.read()
+
+    emb_io = get_hdf5io(path, 'r')
+    rt = emb_io.read()
+
     all_labels = dict()
 
-    if 'metadata' in npz:
+    for lbl in metadata_info:
+        all_labels[lbl] = dict()
+        if metadata_info[lbl]['enum']:
+            all_labels[lbl]['classes'] = dt[lbl].elements[:]
+        all_labels[lbl]['labels'] = dt[lbl].data
 
-        metadata = npz['metadata'].item()
-
-        for key in metadata.keys():
-            enc = LabelEncoder()
-            labels_key = f"{key}_labels"
-            classes_key = f"{key}_classes"
-
-            all_labels[key] = {
-                'labels': enc.fit_transform(metadata[key]),
-                'classes': list(map(str, enc.classes_))
-            }
-            if key == 'time':
-                all_labels[key]['values'] = metadata[key].astype(float)
-
-    else:
-
-        for k in npz.keys():
-            if '_labels' in k:
-                label = k[:-7]
-                all_labels[label] = {'labels': npz[label+'_labels'], 'classes': npz[label+'_classes']}
-
-
-    images, emb = npz['images'], npz['embedding']
-
+    images, emb = dt['images'].data, rt['viz_embedding'].data
 
     idx = np.arange(len(images))
     # Subsample data
@@ -83,10 +79,21 @@ def load_data(path, subsample=None, stratify_label=None, **addl_labels):
             raise ValueError("subsample must be a float between (0.0, 1.0)")
         stratify = all_labels[stratify_label]['labels'] if stratify_label is not None else None
         idx, _ = train_test_split(np.arange(len(images)), train_size=subsample, stratify=stratify)
+        idx = np.sort(idx)
         images = images[idx]
         emb = emb[idx]
         for k in all_labels:
-            all_labels[k]['labels'] = all_labels[k]['labels'][idx]
+            all_labels[k]['labels'] = to_int(all_labels[k]['labels'][idx])
+
+    # Read in all data
+    else:
+        images = images[:]
+        emb = emb[:]
+        for k in all_labels:
+            all_labels[k]['labels'] = to_int(all_labels[k]['labels'][:])
+
+    input_io.close()
+    emb_io.close()
 
     encoded_images = [np_image_to_base64(img) for img in images]
 
@@ -95,7 +102,10 @@ def load_data(path, subsample=None, stratify_label=None, **addl_labels):
     for i in range(len(emb)):
         tmp = list()
         for k in all_labels:
-            c = all_labels[k]['classes'][all_labels[k]['labels'][i]]
+            if metadata_info[k]['enum']:
+                c = all_labels[k]['classes'][all_labels[k]['labels'][i]]
+            else:
+                c = all_labels[k]['labels'][i]
             tmp.append(f"{k}: {c}")
         display_text.append(f"idx: {idx[i]}\n" + " | ".join(tmp))
 
@@ -113,11 +123,10 @@ def load_data(path, subsample=None, stratify_label=None, **addl_labels):
     for k in all_labels:
         df_data[k] = all_labels[k]['labels']
         if k == 'time':
-            df_data1 = all_labels[k]['values'].tolist()
+            df_data1 = all_labels[k]['labels'].tolist()
 
-    df1 = pd.DataFrame(df_data1, columns=['time_values'])
     df = pd.DataFrame(df_data)
-    classes = {k: df[k].unique() for k in all_labels}
+    classes = {k: np.arange(all_labels[k]['classes'].shape[0]) for k in all_labels if 'classes' in all_labels[k]}
 
     dd_options = [{'label': k, 'value': k} for k in all_labels]
 
@@ -129,8 +138,8 @@ def load_data(path, subsample=None, stratify_label=None, **addl_labels):
         fig_vars = ['x', 'y']
 
 
-def list_npz_files(directory):
-    return [{'label': f, 'value': f} for f in os.listdir(directory) if f.endswith('.npz')]
+def list_hdmfai_files(directory):
+    return [{'label': f, 'value': f} for f in os.listdir(directory) if f.endswith('.h5') and os.path.join(directory, f) != input_path]
 
 
 def build_app(directory, subsample=1.0, stratify_label=None, **addl_labels):
@@ -149,7 +158,7 @@ def build_app(directory, subsample=1.0, stratify_label=None, **addl_labels):
         app (dash.Dash)         : a Dash application
     """
 
-    npz_files = list_npz_files(directory)
+    hdmfai_files = list_hdmfai_files(directory)
 
     @callback(
         Output("scatter-tooltip", "show"),
@@ -166,7 +175,7 @@ def build_app(directory, subsample=1.0, stratify_label=None, **addl_labels):
         bbox = hover_data["bbox"]
         num = hover_data["pointNumber"]
 
-        if current_selected_label != 'time':
+        if metadata_info[current_selected_label]['enum']:
             class_id = hover_data['curveNumber']
             class_val = classes[current_selected_label][class_id]
             mask = df[current_selected_label] == class_val
@@ -203,8 +212,8 @@ def build_app(directory, subsample=1.0, stratify_label=None, **addl_labels):
                 n_intervals=0
             ),
             dcc.Dropdown(
-                id='npz-dropdown',
-                options=npz_files,
+                id='hdmfai-dropdown',
+                options=hdmfai_files,
                 placeholder='Select a dataset',
             ),
             html.Div([
@@ -234,18 +243,18 @@ def build_app(directory, subsample=1.0, stratify_label=None, **addl_labels):
         ],
     )
     @app.callback(
-        Output('npz-dropdown', 'options'),
+        Output('hdmfai-dropdown', 'options'),
         Input('interval-component', 'n_intervals')
     )
-    def refresh_npz_list(n_intervals):
+    def refresh_hdmfai_list(n_intervals):
         # List NPZ files in the directory
-        return list_npz_files(directory)
+        return list_hdmfai_files(directory)
 
     @app.callback(
         Output('label-dropdown', 'options'),
         Output('label-dropdown', 'value'),
         [Input('update-button', 'n_clicks')],
-        [State('npz-dropdown', 'value'), State('subsample-input', 'value')],
+        [State('hdmfai-dropdown', 'value'), State('subsample-input', 'value')],
     )
     def update_viz_data(n_clicks, selected_file, subsample):
         if selected_file is None:
@@ -282,8 +291,8 @@ def build_app(directory, subsample=1.0, stratify_label=None, **addl_labels):
         fig = go.Figure()
         if selected_label == 'time':
 
-            global_time_min = df1['time_values'].min()
-            global_time_max = df1['time_values'].max()
+            global_time_min = df['time'].min()
+            global_time_max = df['time'].max()
             norm = Normalize(vmin=global_time_min, vmax=global_time_max)
             fig_kwargs = {var: df[var] for var in fig_vars}
 
@@ -305,7 +314,7 @@ def build_app(directory, subsample=1.0, stratify_label=None, **addl_labels):
                 name='Time Gradient',
                 marker=dict(
                     size=2,
-                    color=df1['time_values'].values,
+                    color=df['time'].values,
                     colorscale=plotly_colorscale,
                     colorbar=dict(
                         title='Time',
@@ -362,9 +371,11 @@ def build_app(directory, subsample=1.0, stratify_label=None, **addl_labels):
 
 
 def main(argv=None):
+    global input_path
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('npz', help='the NumPy file archive containing data for plotting')
+    parser.add_argument('inputs', help='the HDMF input table that contains images and metadata')
+    parser.add_argument('emb_dir', help='the directory containing HDMF-AI tables with embeddings')
     parser.add_argument('-s', '--subsample', help='the fraction to subsample data points to', type=float, default=None)
     parser.add_argument('-l', '--label', help='the label to use for stratifying subsample', default='time')
     parser.add_argument('-P', '--port', help='the port to run the application on', type=int, default=8050)
@@ -372,7 +383,9 @@ def main(argv=None):
 
     args = parser.parse_args(argv)
 
-    app = build_app(args.npz, subsample=args.subsample)
+    input_path = args.inputs
+
+    app = build_app(args.emb_dir, subsample=args.subsample)
 
     app.run(debug=not args.prod, host='0.0.0.0', port=args.port)
 
