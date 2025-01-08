@@ -24,11 +24,9 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 
 from hdmf_ai import ResultsTable
-from hdmf.common import get_hdf5io
+from hdmf.common import get_hdf5io, EnumData
 
-from ..utils import get_metadata_info
-
-metadata_info = get_metadata_info()
+metadata_info = None
 
 # Helper functions
 def np_image_to_base64(im_matrix):
@@ -58,6 +56,10 @@ def load_data(path, subsample=None, stratify_label=None, **addl_labels):
 
     input_io = get_hdf5io(input_path, 'r')
     dt = input_io.read()
+
+    for c in dt.colnames:
+        if c in ('masks', 'images', 'paths', 'raw_images'):
+            continue
 
     emb_io = get_hdf5io(path, 'r')
     rt = emb_io.read()
@@ -372,6 +374,7 @@ def build_app(directory, subsample=1.0, stratify_label=None, **addl_labels):
 
 def main(argv=None):
     global input_path
+    global metadata_info
 
     parser = argparse.ArgumentParser()
     parser.add_argument('inputs', help='the HDMF input table that contains images and metadata')
@@ -384,6 +387,13 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     input_path = args.inputs
+
+    input_io = get_hdf5io(input_path, 'r')
+    dt = input_io.read()
+
+    exclude = {'masks', 'images', 'paths', 'raw_images'}
+
+    metadata_info = {c: {'description': dt[c].description, 'enum': isinstance(dt[c], EnumData)} for c in dt.colnames if c not in exclude}
 
     app = build_app(args.emb_dir, subsample=args.subsample)
 
