@@ -1,0 +1,14 @@
+FROM python:3.13-slim
+
+WORKDIR /app
+
+RUN apt-get -y update
+RUN apt-get -y install git
+
+RUN pip install --no-cache dash pillow numpy pandas scikit-learn matplotlib hdmf git+https://github.com/hdmf-dev/hdmf-ai@0.3.0
+
+COPY src/lmcontrol/viz/interactive_viz.py ./
+
+ENTRYPOINT ["python", "interactive_viz.py"]
+
+CMD ["-s", "0.2", "/image_table.h5", "/results_dir"]
