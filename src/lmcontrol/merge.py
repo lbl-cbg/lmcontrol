@@ -111,7 +111,7 @@ def main(argv=None):
             value = enc.transform(value).astype(np.uint64)
             table.add_column(key, metadata_info[key]['description'], data=value, enum=enc.classes_)
         else:
-            table.add_column(key, metadata_info[key]['description'], data=value)
+            table.add_column(key, metadata_info[key]['description'], data=value.astype(float))
 
     with get_hdf5io(args.output_h5, 'w') as io:
         io.write(table)
