@@ -57,10 +57,6 @@ def load_data(path, subsample=None, stratify_label=None, **addl_labels):
     input_io = get_hdf5io(input_path, 'r')
     dt = input_io.read()
 
-    for c in dt.colnames:
-        if c in ('masks', 'images', 'paths', 'raw_images'):
-            continue
-
     emb_io = get_hdf5io(path, 'r')
     rt = emb_io.read()
 
