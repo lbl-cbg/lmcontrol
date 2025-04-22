@@ -75,6 +75,37 @@ def make_spec(argv=None):
     nsb.export(args.namespace_path)
 
 
+def ls_metadata(argv=None):
+    """
+    Prints the keys and values inside multiple NPZ files.
+    If the value is a scalar or a single-element ndarray, it prints the value.
+    If the value is an ndarray with more than one element, it prints the shape and data type.
+
+    Parameters:
+    argv (list): Command line arguments (default is None).
+    """
+    # Set up argument parsing
+    parser = argparse.ArgumentParser(description='Print keys and values from multiple NPZ files.')
+    parser.add_argument('file_paths', type=str, nargs='+', help='The paths to the NPZ files.')
+
+    # Parse the command-line arguments
+    args = parser.parse_args(argv)
+
+    # Iterate over each file path provided
+    for file_path in args.file_paths:
+        print(f"\n{file_path}")
+        try:
+            with np.load(file_path) as data:
+                for key in data.keys():
+                    value = data[key]
+                    if np.isscalar(value) or (isinstance(value, np.ndarray) and value.size == 1):
+                        print(f"{key:<16}: {value.item()}")  # Use .item() to get the scalar value
+                    else:
+                        print(f"{key:<16}: shape={value.shape}, dtype={value.dtype}")
+        except Exception as e:
+            print(f"An error occurred while processing {file_path}: {e}")
+
+
 def main(argv=None):
 
     desc = "Merge cropped images into a single HDF5 file"
