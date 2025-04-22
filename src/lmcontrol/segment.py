@@ -6,6 +6,10 @@ import os
 from pathlib import Path
 import re
 from zipfile import ZipFile
+import uuid
+import hashlib
+import json
+
 
 from typing import Dict, Iterable, Any, Tuple
 
@@ -330,6 +334,11 @@ def dir_iterator(image_dir, logger):
         image = sio.imread(tif)[:, :, 0]
         yield image_path, image
 
+def list_zip_files(zip_file_path):
+    with ZipFile(zip_file_path, 'r') as zip_file:
+        zip_contents = zip_file.namelist()
+        files_only = [name for name in zip_contents if not name.endswith('/')]
+    return files_only
 
 def zip_iterator(zip_path, paths, logger):
     logger.info(f"Loading {len(paths)} images from {zip_path}")
@@ -345,7 +354,7 @@ def zip_iterator(zip_path, paths, logger):
                 array = np.array(img)[:, :, 0]
                 yield tiff_path, array
 
-def build_metadata(campaign, ht_metadata, sample_metadata):
+def build_metadata(campaign, ht_metadata, sample_metadata, **defaults):
 
     all_metadata = dict()
     for i, sample in sample_metadata.iterrows():
@@ -362,10 +371,10 @@ def build_metadata(campaign, ht_metadata, sample_metadata):
                     feed=ht['Carbon source'],
                     starting_media=ht['Carbon source'],
                 )
+            md = defaults | md
             all_metadata[f"{md['sample']}_HT{md['ht']}"] = md
 
     return all_metadata
-
 
 
 def segment_all(
@@ -455,6 +464,45 @@ def segment_all(
     write_npz(npz_out, seg_images, seg_masks, paths, **metadata)
 
 
+def init_hasher(file_path):
+    base_hasher = hashlib.md5()
+    with open(file_path, "rb") as f:
+        for byte_block in iter(lambda: f.read(4096), b""):
+            base_hasher.update(byte_block)
+    return base_hasher
+
+
+def uniq_dir(base, strings=None):
+    """Compute the MD5 hash of a file and a list of strings."""
+    if isinstance(base, str):
+        assert os.path.isfile(base)
+        hasher = init_hasher(base)
+    else:
+        hasher = base.copy()
+
+    # Process the list of strings
+    for string in (strings or list()):
+        hasher.update(string.encode('utf-8'))  # Encode string to bytes
+
+    return hasher.hexdigest()
+
+
+def make_dir(output_dir, metadata, digest):
+    dirs = [output_dir,
+            metadata['campaign'],
+            'manual_scaling' if metadata['manual_scaling'] ==  1 else 'auto_scaling']
+    if metadata['source'] == 'sample':
+        dirs.append(metadata['sample'])
+        dirs.append(f"HT{metadata['ht']}")
+    elif metadata['source'] == 'background':
+        dirs.append('background')
+    elif metadata['source'] == 'water':
+        dirs.append('water')
+
+    dirs.append(digest)
+    return os.path.join(*dirs)
+
+
 def main(argv=None):
     """
     Segment and images in a directory, saving segmented images to a
@@ -462,7 +510,7 @@ def main(argv=None):
     an ndarray for easy loading of cropped data.
     """
 
-    def crop_size(string):
+    def int_tuple(string):
         if len(string) == 0:
             return (64, 32)
         else:
@@ -493,28 +541,36 @@ def main(argv=None):
                         help="Save unsegmentable images in output_dir under directory 'unseg'")
     parser.add_argument("-n", "--no-tifs", action='store_true', default=False,
                         help="Do not save cropped TIF files i.e. only save the all_processed.npz file")
-    parser.add_argument('-c', '--crop', type=crop_size, default=(64, 32), metavar='SHAPE',
+    parser.add_argument('-c', '--crop', type=int_tuple, default=(64, 32), metavar='SHAPE',
                         help='the size to crop images to (in pixels) for saving as ndarray. default is (64, 32)')
     parser.add_argument('-p', '--pad', default=False, action='store_true',
                         help='pad segmented image with zeros to size indicated with --crop. Otherwise use pad with original image contents')
     parser.add_argument('-C', '--crop_center', action='store_true', default=False,
                         help='the flag to crop the center part of image in case the image is unsegmentable')
     parser.add_argument("-m", "--metadata", help="a comma-separated list of key=value pairs. e.g. ht=1,time=S4", default="", type=metadata_str)
-    parser.add_argument("-M", "--manual-scaling", default=False, action='store_true',
-                        help='mark images as manually scaled')
+    parser.add_argument("-s", "--scaling-limits", type=int_tuple, default=(-1, -1), metavar='MIN_MAX',
+                        help='the min and max values used for scaling')
+    parser.add_argument("-S", "--source", type=str, choices=('sample', 'water', 'background'), default='sample',
+                        help='the source of the image(s)')
+    parser.add_argument("-d", "--debug", action='store_true', default=False,
+                        help="Print output directory names and exit")
 
     args = parser.parse_args(argv)
 
-    logger = get_logger()
+    logger = get_logger("warning" if args.debug else "info")
+
+    default_metadata = dict(scale_min=args.scaling_limits[0], scal_max=args.scaling_limits[1],
+                            manual_scaling=0 if args.scaling_limits == (-1, -1) else 1,
+                            source=args.source)
 
     if os.path.isdir(args.images):
-        if campaign is not None:
+        if args.campaign is not None:
             args.metadata['campaign'] = args.campaign
 
-        args.metadata['manual_scaling'] = int(args.manual_scaling)
+        metadata = default_metadata | args.metadata
 
         it = dir_iterator(args.images)
-        segment_all(it, args.output_dir, args.metadata, logger,
+        segment_all(it, args.output_dir, metadata, logger,
                     crop=args.crop, pad=args.pad, crop_center=args.crop_center,
                     save_unseg=args.save_unseg, no_tifs=args.no_tifs)
     else:
@@ -522,23 +578,43 @@ def main(argv=None):
             logger.error("If providing a Zip file, you must specify the campaign and provide metadata for HTs and Samples")
             exit(2)
 
-        metadata = build_metadata(args.campaign, args.ht_metadata, args.sample_metadata)
+        if args.source == 'sample':
+            metadata = build_metadata(args.campaign, args.ht_metadata, args.sample_metadata, **default_metadata)
 
-        all_paths = extract_s_ht_to_tif_mapping(args.images)
-        keys = [f"S{s}_HT{ht}" for s, ht in all_paths]
-        logger.info(f"Found the following samples in {args.images}\n" + "\n".join(keys))
+            all_paths = extract_s_ht_to_tif_mapping(args.images)
+            keys = [f"S{s}_HT{ht}" for s, ht in all_paths]
+            logger.info(f"Found the following samples in {args.images}\n" + "\n".join(keys))
 
-        for s, ht in all_paths:
-            S_HT = f"S{s}_HT{ht}"
-            it = zip_iterator(args.images, all_paths[(s, ht)], logger)
-            S_HT_md = metadata[S_HT]
 
-            metadata['manual_scaling'] = int(args.manual_scaling)
+            base_hasher = init_hasher(args.images)
 
-            outdir = os.path.join(args.output_dir, f"S{s}", S_HT)
-            segment_all(it, outdir, S_HT_md, logger,
-                        crop=args.crop, pad=args.pad, crop_center=args.crop_center,
-                        save_unseg=args.save_unseg, no_tifs=args.no_tifs)
+            for s, ht in all_paths:
+                paths = all_paths[(s, ht)]
+                it = zip_iterator(args.images, paths, logger)
+                S_HT_md = metadata[f"S{s}_HT{ht}"]
+
+                outdir = make_dir(args.output_dir, S_HT_md, uniq_dir(base_hasher, paths))
+                if args.debug:
+                    print(outdir)
+                else:
+                    segment_all(it, outdir, S_HT_md, logger,
+                                crop=args.crop, pad=args.pad, crop_center=args.crop_center,
+                                save_unseg=args.save_unseg, no_tifs=args.no_tifs)
+        else:
+            if args.campaign is not None:
+                args.metadata['campaign'] = args.campaign
+
+            metadata = default_metadata | args.metadata
+
+            all_paths = list_zip_files(args.images)
+            outdir = make_dir(args.output_dir, metadata, uniq_dir(args.images, all_paths))
+            if args.debug:
+                print(outdir)
+            else:
+                it = zip_iterator(args.images, all_paths, logger)
+                segment_all(it, outdir, metadata, logger,
+                            crop=args.crop, pad=args.pad, crop_center=args.crop_center,
+                            save_unseg=args.save_unseg, no_tifs=args.no_tifs)
 
 
 if __name__ == "__main__":
