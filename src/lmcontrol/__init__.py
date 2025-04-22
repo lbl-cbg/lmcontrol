@@ -19,6 +19,7 @@ def main():
             'make-commands': Command('command.main', 'Make commands for cropping'),
             'make-spec': Command('merge.make_spec', 'Make data table specification'),
             'reformat': Command('merge.main', 'Merge data into monolithic HDMF file'),
+            'ls-metadata': Command('merge.ls_metadata', 'List the metadata available in segmentation NPZ'),
         },
         'Segmentation': {
             'crop': Command('segment.main', 'Crop light microscopy images to bounding box around single cell'),
