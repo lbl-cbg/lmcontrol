@@ -137,6 +137,10 @@ def main(argv=None):
     table.add_column('masks', 'The segmentation masks for each image', data=masks.astype('uint8'))
     table.add_column('paths', 'the original file path for the raw image', data=paths)
     for key, value in metadata.items():
+        if key not in metadata:
+            logger.warning(f"Skipping key '{key}' - Not found in metadata info")
+            continue
+
         if metadata_info[key]['enum']:
             enc = LabelEncoder().fit(value)
             value = enc.transform(value).astype(np.uint64)
