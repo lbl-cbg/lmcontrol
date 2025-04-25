@@ -86,7 +86,7 @@ class BYOL(L.LightningModule):
         p1 = self.forward(x1)
         z1 = self.forward_momentum(x1)
         loss = 0.5 * (self.criterion(p0, z1) + self.criterion(p1, z0))
-        self.log(self.train_metric, loss, batch_size=x0.size(0))
+        self.log(self.train_metric, loss, batch_size=x0.size(0), sync_dist=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -96,7 +96,7 @@ class BYOL(L.LightningModule):
         p1 = self.forward(x1)
         z1 = self.forward_momentum(x1)
         loss = 0.5 * (self.criterion(p0, z1) + self.criterion(p1, z0))
-        self.log(self.val_metric, loss, batch_size=x0.size(0))
+        self.log(self.val_metric, loss, batch_size=x0.size(0), sync_dist=True)
         return loss
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
@@ -104,7 +104,24 @@ class BYOL(L.LightningModule):
         return self.backbone(x).flatten(start_dim=1)
 
     def configure_optimizers(self):
-        return torch.optim.SGD(self.parameters(), lr=self.lr)
+        optimizer = torch.optim.SGD(self.parameters(), lr=self.lr)
+
+        # Define the scheduler with milestones at epochs 10 and 20
+        scheduler = torch.optim.lr_scheduler.MultiStepLR(
+            optimizer,
+            milestones=[5, 10],  # Reduce LR at epochs 10 and 20
+            gamma=0.1,            # Reduce by factor of 10 each time
+        )
+
+        # Return both the optimizer and the scheduler
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": "epoch",  # Call scheduler after each epoch
+                "frequency": 1,       # Call scheduler every epoch
+            }
+        }
 
 
 def _get_trainer(args, trial=None):
@@ -127,7 +144,9 @@ def _get_trainer(args, trial=None):
         filename="checkpoint-{epoch:02d}-{validation_ncs:.4f}",
         save_top_k=3,
         monitor="validation_ncs",
-        mode="min"
+        mode="min",
+        save_last=True,
+        every_n_epochs=2,
     )
     callbacks.append(checkpoint_callback)
 
@@ -151,6 +170,13 @@ def _get_trainer(args, trial=None):
                        config=vars(args))
             targs['logger'] = WandbLogger(project='lmcontrol', log_model=True)
 
+    if args.debug:
+        targs['limit_train_batches'] = 100
+        targs['limit_val_batches'] = 10
+
+    targs['limit_train_batches'] = 100
+    targs['limit_val_batches'] = 10
+
     return L.Trainer(**targs)
 
 
@@ -168,20 +194,24 @@ def train(argv=None):
     parser.add_argument("-e", "--epochs", type=int, help="the number of epochs to run for", default=10)
     parser.add_argument("-d", "--debug", action='store_true', help="run with a small dataset", default=False)
     parser.add_argument("-o", "--outdir", type=str, help="the directory to save output to", default='.')
-    parser.add_argument("-n", "--n_samples", type=int, help="number of samples to use from each NPZ", default=None)
+    parser.add_argument("-N", "--n_samples", type=int, help="number of samples to use from each NPZ", default=None)
     parser.add_argument("--early_stopping", action='store_true', help="enable early stopping", default=False)
     parser.add_argument("--wandb", action='store_true', default=False, help="provide this flag to stop wandb")
     parser.add_argument("--lr", type=float, help="learning rate", default=0.001)
     parser.add_argument("-b", "--batch-size", type=int, help="batch size for training and validation", default=32)
-    parser.add_argument("--block", type=get_block, choices=['BasicBlock', 'Bottleneck'], help="type of block to use in the model", default='Bottleneck')
-    parser.add_argument("--planes", type=get_planes, choices=['3', '4'], help="list of number of planes for each layer", default='4')
-    parser.add_argument("--layers", type=get_layers, choices=['1', '2', '3', '4'], help="list of number of layers in each stage", default='4')
+    parser.add_argument("--block", type=str, choices=['BasicBlock', 'Bottleneck'], help="type of block to use in the model", default='Bottleneck')
+    parser.add_argument("--planes", type=str, choices=['3', '4'], help="list of number of planes for each layer", default='4')
+    parser.add_argument("--layers", type=str, choices=['1', '2', '3', '4'], help="list of number of layers in each stage", default='4')
     parser.add_argument("--accelerator", type=str, help="type of accelerator for trainer", default="gpu")
     parser.add_argument("--strategy", type=str, help="type of strategy for trainer", default="auto")
     parser.add_argument("-g", "--devices", type=int, help="number of devices for trainer", default=1)
-    parser.add_argument("-N", "--num_nodes", type=int, help="number of nodes for trainer", default=1)
+    parser.add_argument("-n", "--num_nodes", type=int, help="number of nodes for trainer", default=1)
 
     args = parser.parse_args(argv)
+
+    args.block = get_block(args.block)
+    args.planes = get_planes(args.planes)
+    args.layers = get_planes(args.layers)
 
     logger = get_logger('info')
 
@@ -198,11 +228,14 @@ def train(argv=None):
     )
 
     train_loader, val_loader = get_loaders(args,
+                                           inference=False,
                                            train_tfm=train_transform,
                                            val_tfm=val_transform,
+                                           exp_split=True,
                                            return_labels=False)
     model = BYOL()
     trainer = _get_trainer(args)
+    logger.info(str(trainer))
     trainer.fit(model, train_loader, val_loader)
 
 def predict(argv=None):
@@ -214,7 +247,7 @@ def predict(argv=None):
     parser.add_argument("--split-seed", type=parse_seed, help="seed for dataset splits", default=None)
     parser.add_argument("-d", "--debug", action='store_true', help="run with a small dataset", default=False)
     parser.add_argument("-p", "--pred-only", action='store_true', default=False, help="only save predictions, otherwise save original image data and labels in output")
-    parser.add_argument("-n", "--n-samples", type=int, help="number of samples to use from each class", default=None)
+    parser.add_argument("-N", "--n-samples", type=int, help="number of samples to use from each class", default=None)
     parser.add_argument("-b", "--batch-size", type=int, help="batch size for training and validation", default=64)
     parser.add_argument("-g", "--devices", type=int, help="number of devices for trainer", default=1)
     parser.add_argument("-V", "--add-viz", action='store_true', help="Compute UMAP embedding for visualiztion", default=False)
