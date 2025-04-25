@@ -43,6 +43,7 @@ dependencies = [
     "numba",
     "optuna",
     "wandb",
+    "openpyxl",
 ]
 
 dynamic = ["version"]

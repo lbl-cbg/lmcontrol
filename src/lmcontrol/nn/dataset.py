@@ -1,3 +1,4 @@
+import sys
 
 # function 'norm ' has been modified. Please keep a check of it.
 import numpy as np
@@ -13,7 +14,6 @@ from ..utils import get_logger
 
 import torch
 from torch.utils.data import Dataset
-import glob
 
 class GaussianNoise(T._transform.Transform):
     """Applies random Gaussian noise to a tensor.
@@ -84,7 +84,7 @@ class LMDataset(Dataset):
         return label in cls.__regression_labels
 
     def __init__(self, path, label_classes=None, use_masks=False, return_labels=False, logger=None, transform=None,
-                 label=None, n_samples=None, split=None, val_size=None):
+                 label=None, n_samples=None, split=None, rand_split=False, exp_split=False, split_seed=None):
         """
         Args:
             path (str)                  : path to the HDMF DynamicTable file
@@ -96,9 +96,18 @@ class LMDataset(Dataset):
             label (str, list, tuple)    : the label(s) to return when getting a sample
             n_samples (int)             : the number of samples to load from each file
             split (str)                 : a string indication which split to use ("train" or "val")
-            val_size (float)            : fraction of data to use for validation
+            exp_split (bool)            : calculate train-validation-test split using metdata on campaign, condition,
+                                          and ht (a.k.a. replicate). validation and test split are first calculated
+                                          by getting single unique ht for each condition for each campaign. This is
+                                          then split between campaigns. All remaining samples are left for training.
+                                          exp_split is short for "experimental split"
 
         """
+        import uuid
+        self.uuid = uuid.uuid1()
+        if rand_split and exp_split:
+            raise ValueError("rand_split and exp_split cannot both be True")
+
         self.logger = logger or get_logger('warning')
 
         self.path = path
@@ -123,6 +132,20 @@ class LMDataset(Dataset):
 
         self.open()
         self.__len = len(self.table)
+
+        self.exp_split = exp_split
+        self.rand_split = rand_split
+
+        if exp_split:
+            train_mask, val_mask, test_mask = make_masks(self.table, split_validation=True, seed=split_seed)
+            split_mask = np.zeros(self.__len, dtype=int)
+            split_mask[train_mask] = self.split_vals['train']
+            split_mask[val_mask] = self.split_vals['validation']
+            split_mask[test_mask] = self.split_vals['test']
+            self.set_split(split_mask)
+        elif rand_split:
+            self.set_random_split(0.1, 0.1, seed=split_seed)
+
         self.close()
 
         # self.label_classes is set up so that we can specify label_classes or compute them on the fly.
@@ -176,11 +199,11 @@ class LMDataset(Dataset):
         if seed is not None:
             rng.manual_seed(seed)
 
-        perm = torch.randperm(n, generator=rng)
-
         split = torch.zeros(n, dtype=torch.uint8) + self.split_vals['train']
         split[train_len:train_len+val_len] = self.split_vals['validation']
         split[train_len+val_len:] = self.split_vals['test']
+
+        split = split[torch.randperm(n, generator=rng)]
 
         self.set_split(split)
 
@@ -188,10 +211,11 @@ class LMDataset(Dataset):
             self.close()
 
     def set_split(self, split_mask):
-        self.split_mask = split_mask
+        self.split_mask = torch.as_tensor(split_mask)
         if self.split is not None:
             self.subset = torch.where(self.split_mask == self.split_vals[self.split])[0]
             self.__len = len(self.subset)
+
 
     def __getitem__(self, i):
         i = i if self.subset is None else self.subset[i]
@@ -280,3 +304,96 @@ def get_lightly_dataset(npzs, transform=None, **lmdset_kwargs):
     return LightlyDataset.from_torch_dataset(dataset,
                                              transform=transform,
                                              index_to_filename=dataset.index_to_filename)
+
+
+def make_masks(table, split_validation=False, validation_split_ratio=0.5, seed=None):
+    """
+    Creates masks for training and validation splits using only numpy.
+
+    Args:
+        table: Dictionary-like object containing the data arrays
+        split_validation: If True, splits validation set into two separate sets
+        validation_split_ratio: Ratio for splitting validation campaigns (default: 0.5)
+
+    Returns:
+        train_mask: Boolean array for training data
+        val_mask: Boolean array for validation data (or first validation set if split)
+        val2_mask: Boolean array for second validation set (if split_validation=True)
+        rep_tuples: List of representative tuples (campaign, condition, ht) in validation
+        rep_tuples2: List of representative tuples in second validation set (if split_validation=True)
+    """
+    mask = table['source'].data[:] == 1
+
+    campaign = table['campaign'].data[:][mask]
+    condition = table['condition'].data[:][mask]
+    ht = table['ht'].data[:][mask]
+
+    # Get unique campaigns and potentially split them
+    unique_campaigns = np.sort(np.unique(campaign))
+
+    if split_validation:
+        # Randomly shuffle campaigns for splitting
+        np.random.default_rng(seed).shuffle(unique_campaigns)
+        split_idx = int(len(unique_campaigns) * validation_split_ratio)
+        val1_campaigns = unique_campaigns[:split_idx]
+        val2_campaigns = unique_campaigns[split_idx:]
+    else:
+        val1_campaigns = unique_campaigns
+        val2_campaigns = []
+
+    def process_validation_set(campaigns):
+        """
+        Helper function to process a set of campaigns for validation
+        """
+        indices = []
+
+        for camp in campaigns:
+            camp_mask = campaign == camp
+            camp_conditions = np.unique(condition[camp_mask])
+
+            for cond in camp_conditions:
+                cond_mask = (campaign == camp) & (condition == cond)
+                unique_hts = np.sort(np.unique(ht[cond_mask]))
+
+                if len(unique_hts) > 0:
+                    selected_ht = unique_hts[0]
+
+                    val_indices_for_cond = np.where((campaign == camp) &
+                                                  (condition == cond) &
+                                                  (ht == selected_ht))[0]
+                    indices.extend(val_indices_for_cond)
+
+        return indices
+
+    # Process validation sets
+    val1_indices = process_validation_set(val1_campaigns)
+
+    if split_validation:
+        val2_indices = process_validation_set(val2_campaigns)
+
+    # Create the masks
+    tmp_val1_mask = np.zeros(len(campaign), dtype=bool)
+    tmp_val1_mask[val1_indices] = True
+
+    indices = np.where(mask)[0]
+    val1_mask = np.zeros_like(mask)
+    val1_mask[indices[tmp_val1_mask]] = True
+
+    if split_validation:
+        tmp_val2_mask = np.zeros(len(campaign), dtype=bool)
+        tmp_val2_mask[val2_indices] = True
+
+        val2_mask = np.zeros_like(mask)
+        val2_mask[indices[tmp_val2_mask]] = True
+
+        # Training mask excludes both validation sets
+        train_mask = np.zeros_like(mask)
+        train_mask[indices[~(tmp_val1_mask | tmp_val2_mask)]] = True
+
+        return train_mask, val1_mask, val2_mask
+    else:
+        # Training mask excludes validation set
+        train_mask = np.zeros_like(mask)
+        train_mask[indices[~tmp_val1_mask]] = True
+
+        return train_mask, val1_mask

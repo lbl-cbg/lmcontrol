@@ -559,7 +559,7 @@ def main(argv=None):
 
     logger = get_logger("warning" if args.debug else "info")
 
-    default_metadata = dict(scale_min=args.scaling_limits[0], scal_max=args.scaling_limits[1],
+    default_metadata = dict(scale_min=args.scaling_limits[0], scale_max=args.scaling_limits[1],
                             manual_scaling=0 if args.scaling_limits == (-1, -1) else 1,
                             source=args.source)
 

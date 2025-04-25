@@ -155,6 +155,7 @@ class ResNet(nn.Module):
 
 
 def get_block(block_type):
+    """This is the type of sub-block to use to build a resnet block"""
     return {
         'BasicBlock': BasicBlock,
         'Bottleneck': Bottleneck
@@ -162,11 +163,13 @@ def get_block(block_type):
 
 
 def get_planes(plane_cmd):
+    """This is the size (i.e. number of planes/channels) of each layer in a resnet block"""
     p = int(plane_cmd)
     return [2**p, 2**(p+1), 2**(p+2), 2**(p+3)]
 
 
 def get_layers(layers_cmd):
+    """This is actually the number of resnet blocks to use, where we fix the size of each resnet block to be 1 layer."""
     l = int(layers_cmd)
     layers = [1 if i < l else 0 for i in range(4)]
     return layers

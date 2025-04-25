@@ -19,3 +19,15 @@ starting_media:
 campaign:
   description: the campaign (a.k.a. experiment) of the bioreactor
   enum: true
+manual_scaling:
+  description: whether or not scaling was done manually
+  enum: false
+scale_max:
+  description: the max value when scaling images. This is a property set on the Flow cytometer data processing system
+  enum: false
+scale_min:
+  description: the min value when scaling images. This is a property set on the Flow cytometer data processing system
+  enum: false
+source:
+  description: the source of this sampl--water, background, or sample--where sample indicates a sample from the bioreactor
+  enum: true
