@@ -174,9 +174,6 @@ def _get_trainer(args, trial=None):
         targs['limit_train_batches'] = 100
         targs['limit_val_batches'] = 10
 
-    targs['limit_train_batches'] = 100
-    targs['limit_val_batches'] = 10
-
     return L.Trainer(**targs)
 
 
