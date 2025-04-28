@@ -34,11 +34,6 @@ def get_loaders(args, inference=True, tfm=None, train_tfm=None, val_tfm=None, re
         logger.info(f"Loading validation data from {args.input}")
         val_dataset = LMDataset(args.input, transform=val_tfm, split='validation', **dset_kwargs)
 
-        #if args.debug:
-        #    train_dataset.open()
-        #    val_dataset.open()
-
-
         train_loader = DataLoader(train_dataset, shuffle=True, worker_init_fn=train_dataset.open, **dl_kwargs)
         val_loader = DataLoader(val_dataset, shuffle=False, worker_init_fn=val_dataset.open, **dl_kwargs)
 

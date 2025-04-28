@@ -103,8 +103,6 @@ class LMDataset(Dataset):
                                           exp_split is short for "experimental split"
 
         """
-        import uuid
-        self.uuid = uuid.uuid1()
         if rand_split and exp_split:
             raise ValueError("rand_split and exp_split cannot both be True")
 
