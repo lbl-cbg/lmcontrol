@@ -287,11 +287,11 @@ def build_app(directory, subsample=1.0, stratify_label=None, **addl_labels):
         current_selected_label = selected_label
 
         fig = go.Figure()
-        if selected_label == 'time':
+        if selected_label not in classes:
 
-            global_time_min = df['time'].min()
-            global_time_max = df['time'].max()
-            norm = Normalize(vmin=global_time_min, vmax=global_time_max)
+            global_min = df[selected_label].min()
+            global_max = df[selected_label].max()
+            norm = Normalize(vmin=global_min, vmax=global_max)
             fig_kwargs = {var: df[var] for var in fig_vars}
 
             custom_cmap = LinearSegmentedColormap.from_list(
@@ -309,18 +309,18 @@ def build_app(directory, subsample=1.0, stratify_label=None, **addl_labels):
 
             fig.add_trace(go.Scatter3d(
                 mode='markers',
-                name='Time Gradient',
+                name=selected_label,
                 marker=dict(
                     size=2,
-                    color=df['time'].values,
+                    color=df[selected_label].values,
                     colorscale=plotly_colorscale,
                     colorbar=dict(
-                        title='Time',
-                        tickvals=[global_time_min, global_time_max],
-                        ticktext=[global_time_min, global_time_max]
+                        title=selected_label,
+                        tickvals=[global_min, global_max],
+                        ticktext=[global_min, global_max]
                     ),
-                    cmin=global_time_min,
-                    cmax=global_time_max,
+                    cmin=global_min,
+                    cmax=global_max,
                 ),
                 **fig_kwargs
             ))
