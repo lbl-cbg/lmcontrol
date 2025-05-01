@@ -11,7 +11,7 @@ import hashlib
 import json
 
 
-from typing import Dict, Iterable, Any, Tuple
+from typing import Dict, Iterable, Any, Tuple, Optional
 
 from numba import njit
 import numpy as np
@@ -382,7 +382,7 @@ def segment_all(
         output_dir: str,
         metadata: Dict[str, Any],
         logger,
-        crop: Tuple[int, int] = (64, 32),
+        crop: Optional[Tuple[int, int]] = (64, 32),
         pad: bool = False,
         crop_center: bool = False,
         save_unseg: bool = False,
@@ -424,8 +424,12 @@ def segment_all(
             if (segi.shape[1] / segi.shape[0]) >= 1.4:
                 image = ndi.rotate(image, -90)
                 mask = ndi.rotate(mask, -90)
-            segi = trim_box(mask, image, size=crop, pad=pad)
-            segm = trim_box(mask, mask, size=crop, pad=pad)
+            if crop is None:
+                segi = image
+                segm = mask
+            else:
+                segi = trim_box(mask, image, size=crop, pad=pad)
+                segm = trim_box(mask, mask, size=crop, pad=pad)
 
             seg_images.append(segi)
             seg_masks.append(segm)
@@ -437,7 +441,7 @@ def segment_all(
                     os.makedirs(os.path.dirname(target), exist_ok=True)
                     dir_exists = True
                 sio.imsave(target, image)
-            if crop_center:
+            if crop is not None and crop_center:
                 crop_centerped_image = crop_image_center(image, crop_size=crop, pad=pad)
                 seg_images.append(crop_centerped_image)
                 seg_masks.append(np.zeros_like(crop_centerped_image))
@@ -541,8 +545,8 @@ def main(argv=None):
                         help="Save unsegmentable images in output_dir under directory 'unseg'")
     parser.add_argument("-n", "--no-tifs", action='store_true', default=False,
                         help="Do not save cropped TIF files i.e. only save the all_processed.npz file")
-    parser.add_argument('-c', '--crop', type=int_tuple, default=(64, 32), metavar='SHAPE',
-                        help='the size to crop images to (in pixels) for saving as ndarray. default is (64, 32)')
+    parser.add_argument('-c', '--crop', type=int_tuple, default=None, metavar='SHAPE',
+                        help='the size to crop images to (in pixels) for saving as ndarray. do not crop by default')
     parser.add_argument('-p', '--pad', default=False, action='store_true',
                         help='pad segmented image with zeros to size indicated with --crop. Otherwise use pad with original image contents')
     parser.add_argument('-C', '--crop_center', action='store_true', default=False,
