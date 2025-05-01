@@ -20,6 +20,7 @@ def main():
             'make-spec': Command('merge.make_spec', 'Make data table specification'),
             'reformat': Command('merge.main', 'Merge data into monolithic HDMF file'),
             'ls-metadata': Command('merge.ls_metadata', 'List the metadata available in segmentation NPZ'),
+            'downsample': Command('downsample.main', 'Downsample a DynamicTable'),
         },
         'Segmentation': {
             'crop': Command('segment.main', 'Crop light microscopy images to bounding box around single cell'),
