@@ -22,7 +22,7 @@ def main():
             'ls-metadata': Command('merge.ls_metadata', 'List the metadata available in segmentation NPZ'),
         },
         'Segmentation': {
-            'crop': Command('segment.main', 'Crop light microscopy images to bounding box around single cell'),
+            'segment': Command('segment.main', 'Segment light microscopy images to bounding box around single cell'),
             'add-md': Command('segment.add_metadata', 'Add metadata to cropped image package'),
             'prep-viz': Command('viz.make_package.main', 'Prepare package for visualizing image embeddings'),
             'add-md': Command('segment.add_metadata', 'Add metadata to cropped image package'),
