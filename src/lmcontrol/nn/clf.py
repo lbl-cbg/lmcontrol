@@ -63,8 +63,8 @@ class CrossEntropy(nn.Module):
 
 class LightningResNet(L.LightningModule):
 
-    val_metric = "validation_ncs"
-    train_metric = "train_ncs"
+    val_metric = "total_val_loss"
+    train_metric = "total_train_loss"
 
     loss_functions = {
         'time': nn.MSELoss(),
@@ -166,7 +166,7 @@ class LightningResNet(L.LightningModule):
         loss_components = self.criterion(outputs, labels)
         self._score("train", outputs, loss_components, labels)
         total_loss = sum(loss_components)
-        self.log('total_train_loss', total_loss, on_step=False, on_epoch=True)
+        self.log(self.train_metric, total_loss, on_step=False, on_epoch=True)
 
 
     def validation_step(self, batch, batch_idx):
@@ -175,7 +175,7 @@ class LightningResNet(L.LightningModule):
         loss_components = self.criterion(outputs, labels)
         self._score("val", outputs, loss_components, labels)
         total_loss = sum(loss_components)
-        self.log('total_val_loss', total_loss, on_step=False, on_epoch=True)
+        self.log(self.val_metric, total_loss, on_step=False, on_epoch=True)
         return total_loss
 
     def configure_optimizers(self):
@@ -207,8 +207,8 @@ def get_layers(layers_cmd):
 
 
 def _add_training_args(parser):
+    parser.add_argument("input", type=str, help="Training image data")
     parser.add_argument('label', type=str, nargs='+', choices=['time', 'feed', 'starting_media', 'condition', 'sample'], help="the label to train with")
-    parser.add_argument("--training", type=str, nargs='+', required=True, help="directories containing training data")
 
     grp = parser.add_mutually_exclusive_group()
     grp.add_argument("--validation", type=str, nargs='+', help="directories containing validation data")
@@ -233,14 +233,16 @@ def _add_training_args(parser):
     parser.add_argument("--return_embeddings", action='store_true', default=False, help="return ResNet features, rather than final output")
 
 
-def _get_loaders_and_model(args,  logger=None):
-    train_transform = _get_transforms('float', 'norm','blur','rotate', 'crop','hflip', 'vflip', 'noise', 'rgb')
-    val_transform = _get_transforms('float', 'norm','blur','rotate', 'crop','hflip', 'vflip', 'noise', 'rgb')
+def _get_loaders_and_model(args,  inference=False, logger=None):
+    train_transform = _get_transforms('float', 'norm', 'blur','rotate', 'crop', 'hflip', 'vflip', 'noise', 'rgb')
+    val_transform = _get_transforms('float', 'norm', 'blur','rotate', 'crop', 'hflip', 'vflip', 'noise', 'rgb')
 
     train_loader, val_loader = get_loaders(args,
+                                           inference=inference,
                                            train_tfm=train_transform,
                                            val_tfm=val_transform,
-                                           return_labels=False)
+                                           exp_split=True,
+                                           return_labels=True)
 
 
     model = LightningResNet(train_dataset.label_classes, lr=args.lr, step_size=args.step_size, gamma=args.gamma,
@@ -254,27 +256,50 @@ def _get_trainer(args, trial=None):
 
     callbacks = []
 
-    targs = dict(max_epochs=args.epochs, devices=1, accelerator=accelerator, check_val_every_n_epoch=4, callbacks=callbacks)
+    targs = dict(num_nodes=args.num_nodes, max_epochs=args.epochs, devices=args.devices,
+                 accelerator="gpu" if args.devices > 0 else "cpu", check_val_every_n_epoch=1, callbacks=callbacks)
 
-    if args.checkpoint:
-        checkpoint_callback = ModelCheckpoint(
-            dirpath=args.checkpoint,
-            filename="checkpoint-{epoch:02d}-{total_val_loss:.4f}",
-            save_top_k=3,
-            monitor="total_val_loss",
-            mode="min"
-        )
-        callbacks.append(checkpoint_callback)
+    if args.devices > 0:
+        torch.set_float32_matmul_precision('medium')
 
-    if trial is not None :
-        targs['logger'] = CSVLogger(args.outdir, name=args.experiment)
+    if args.devices > 1:  # If using multiple GPUs, use Distributed Data Parallel (DDP)
+        targs['strategy'] = DDPStrategy(find_unused_parameters=True)
+
+    # should we use r2 score and val_accuracy for measurement
+    checkpoint_callback = ModelCheckpoint(
+        dirpath=args.outdir,
+        filename="checkpoint-{epoch:02d}-{validation_ncs:.4f}",
+        save_top_k=3,
+        monitor="validation_ncs",
+        mode="min",
+        save_last=True,
+        every_n_epochs=1,
+    )
+    callbacks.append(checkpoint_callback)
+
+    early_stopping_callback = EarlyStopping(
+        monitor="validation_ncs",
+        patience=5,
+        min_delta=0.001,
+        mode="min"
+    )
+    callbacks.append(early_stopping_callback)
+
+
+    targs['logger'] = CSVLogger(args.outdir)
+    if trial is not None :   # if 'trial' is passed in, assume we are using Optuna to do HPO
         if args.pruning:
             callbacks.append(PyTorchLightningPruningCallback(trial, monitor="combined_metric"))
 
     else:
         if args.wandb:
-            wandb.init(project="SX_HTY_Run1")
-            targs['logger'] = WandbLogger(project='your_project_name', log_model=True)
+            wandb.init(project="lmcontrol",
+                       config=vars(args))
+            targs['logger'] = WandbLogger(project='lmcontrol', log_model=True)
+
+    if args.debug:
+        targs['limit_train_batches'] = 100
+        targs['limit_val_batches'] = 10
 
     return L.Trainer(**targs)
 
