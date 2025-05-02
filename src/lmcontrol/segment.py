@@ -456,8 +456,9 @@ def segment_all(
             if image.std() > 15:
                 raise UnsegmentableError("StdDev of pixels is quite high, this is probably a bad image")
             mask = outlier_cluster(image)
-            segi = trim_box(mask, image)
-            orig_seg_images.append(segi)  # Save segmented original image
+            if not no_tifs:
+                segi = trim_box(mask, image)
+                orig_seg_images.append(segi)  # Save segmented original image
             paths.append(image_path)
 
             if crop is None:
