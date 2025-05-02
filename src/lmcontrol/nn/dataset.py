@@ -83,14 +83,15 @@ class LMDataset(Dataset):
     def is_regression(cls, label):
         return label in cls.__regression_labels
 
-    def __init__(self, path, label_classes=None, use_masks=False, return_labels=False, logger=None, transform=None,
+    def __init__(self, path, label_classes=None, use_images=True, use_masks=False, return_labels=False, logger=None, transform=None,
                  label=None, n_samples=None, split=None, rand_split=False, exp_split=False, split_seed=None):
         """
         Args:
             path (str)                  : path to the HDMF DynamicTable file
             label_classes (dict)        : a dictionary of classes for each label
-            use_masks (bool)            : whether or not to use masks instead of images
-            return_labels (bool)        : whether or not to return labels for each data point
+            images (bool)               : whether or not to return images
+            use_masks (bool)            : whether or not to return masks
+            use_return_labels (bool)    : whether or not to return labels for each data point
             logger (Logger)             : the logger to use when loading data
             transform (Transform)       : the transform to apply to each image
             label (str, list, tuple)    : the label(s) to return when getting a sample
@@ -110,7 +111,8 @@ class LMDataset(Dataset):
 
         self.path = path
 
-        self.use_masks = use_masks
+        self.use_images = images
+        self.use_masks = masks
         self.return_labels = return_labels
 
         if not isinstance(label, (tuple, list)):
@@ -157,10 +159,6 @@ class LMDataset(Dataset):
             self.io = get_hdf5io(self.path, 'r')
             self.table = self.io.read()
 
-            if self.use_masks:
-                self.data = self.table['masks'].data
-            else:
-                self.data = self.table['images'].data
 
             self.label_classes = dict()
 
@@ -177,7 +175,6 @@ class LMDataset(Dataset):
         self.io.close()
         self.table = None
         self.io = None
-        self.data = None
 
     def set_random_split(self, val_frac, test_frac, seed=None):
         if (val_frac + test_frac) >= 1.0:
@@ -217,9 +214,18 @@ class LMDataset(Dataset):
 
     def __getitem__(self, i):
         i = i if self.subset is None else self.subset[i]
-        ret = torch.as_tensor(self.data[i]).unsqueeze(0)
+        ret = list()
+
+        if self.use_images:
+            ret.append(torch.as_tensor(self.table['images'].data[i]).unsqueeze(0))
+        if self.use_masks:
+            ret.append(torch.as_tensor(self.table['masks'].data[i]).unsqueeze(0))
+
         if self.transform is not None:
+            # TODO: self.transform should account for an image or an image plus mask.
+            # This is so we can do transformations with the segmentation mask
             ret = self.transform(ret)
+
         if self.sample_labels is None:
             return ret
         else:
