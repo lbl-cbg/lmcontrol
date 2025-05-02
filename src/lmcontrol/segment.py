@@ -377,6 +377,45 @@ def build_metadata(campaign, ht_metadata, sample_metadata, **defaults):
     return all_metadata
 
 
+def pad_images_to_max_size(image_list, padval=None):
+    if not image_list:
+        return []
+
+    # Find the maximum dimensions
+    max_height = max(img.shape[0] for img in image_list)
+    max_width = max(img.shape[1] for img in image_list)
+
+    padded_images = []
+
+    if padval is None:
+        padval_func = lambda img: np.median(img)
+    else:
+        padval_func = lambda img: padval
+
+    for img in image_list:
+        # Calculate padding needed
+        pad_height = max_height - img.shape[0]
+        pad_width = max_width - img.shape[1]
+
+        # Calculate padding for each side
+        top_pad = pad_height // 2
+        bottom_pad = pad_height - top_pad
+        left_pad = pad_width // 2
+        right_pad = pad_width - left_pad
+
+        # Pad the image
+        padded_img = np.pad(
+            img,
+            ((top_pad, bottom_pad), (left_pad, right_pad)),
+            mode='constant',
+            constant_values=padval_func(img)
+        )
+
+        padded_images.append(padded_img)
+
+    return padded_images
+
+
 def segment_all(
         images: Iterable,
         output_dir: str,
@@ -384,7 +423,7 @@ def segment_all(
         logger,
         crop: Optional[Tuple[int, int]] = (64, 32),
         pad: bool = False,
-        crop_center: bool = False,
+        include_unseg: bool = False,
         save_unseg: bool = False,
         no_tifs: bool = False,
 ):
@@ -407,10 +446,12 @@ def segment_all(
     npz_out = os.path.join(output_dir, "all_processed.npz")
     logger.info(f"Cropping images to {crop} and saving to {npz_out} for convenience")
 
+    shapes = set()
     n_total_imgs = 0
     for image_path, image in images:
         n_total_imgs += 1
         try:
+            shapes.add(image.shape)
             # Check for bad images caused by flow-cytometer and/or imaging errors
             if image.std() > 15:
                 raise UnsegmentableError("StdDev of pixels is quite high, this is probably a bad image")
@@ -419,11 +460,6 @@ def segment_all(
             orig_seg_images.append(segi)  # Save segmented original image
             paths.append(image_path)
 
-            # Rotate image if cell is oriented horizontally
-            # and crop to standard size
-            if (segi.shape[1] / segi.shape[0]) >= 1.4:
-                image = ndi.rotate(image, -90)
-                mask = ndi.rotate(mask, -90)
             if crop is None:
                 segi = image
                 segm = mask
@@ -441,17 +477,24 @@ def segment_all(
                     os.makedirs(os.path.dirname(target), exist_ok=True)
                     dir_exists = True
                 sio.imsave(target, image)
-            if crop is not None and crop_center:
-                crop_centerped_image = crop_image_center(image, crop_size=crop, pad=pad)
-                seg_images.append(crop_centerped_image)
-                seg_masks.append(np.zeros_like(crop_centerped_image))
+            if include_unseg:
                 paths.append(image_path)
+                if crop:
+                    segi = crop_image_center(image, crop_size=crop, pad=pad)
+                else:
+                    segi = image
+                segm = np.zeros_like(segi)
+                seg_images.append(segi)
+                seg_masks.append(segm)
             continue
 
     logger.info(f"Done segmenting images. {n_unseg} ({100 * n_unseg / n_total_imgs:.1f}%) images were unsegmentable")
 
 
-    # [(i, img.shape) for i, img in enumerate(seg_images) if img.shape != (96, 96)]
+    if crop is None and len(shapes) > 1:
+        seg_images = pad_images_to_max_size(seg_images)
+        seg_masks = pad_images_to_max_size(seg_masks, padval=0)
+
     seg_images = np.array(seg_images, dtype=np.uint8)
     seg_masks = np.array(seg_masks, dtype=np.uint8)
     paths = np.array(paths)
@@ -543,14 +586,14 @@ def main(argv=None):
     parser.add_argument('sample_metadata', type=spreadsheet, help='a spreadsheet with metadata about samples', default=None)
     parser.add_argument("-u", "--save-unseg", action='store_true', default=False,
                         help="Save unsegmentable images in output_dir under directory 'unseg'")
+    parser.add_argument("-U", "--include-unseg", action='store_true', default=False,
+                        help="Included unsegmentable images in all_processed.npz, cropping from center if necessary")
     parser.add_argument("-n", "--no-tifs", action='store_true', default=False,
                         help="Do not save cropped TIF files i.e. only save the all_processed.npz file")
     parser.add_argument('-c', '--crop', type=int_tuple, default=None, metavar='SHAPE',
                         help='the size to crop images to (in pixels) for saving as ndarray. do not crop by default')
     parser.add_argument('-p', '--pad', default=False, action='store_true',
                         help='pad segmented image with zeros to size indicated with --crop. Otherwise use pad with original image contents')
-    parser.add_argument('-C', '--crop_center', action='store_true', default=False,
-                        help='the flag to crop the center part of image in case the image is unsegmentable')
     parser.add_argument("-m", "--metadata", help="a comma-separated list of key=value pairs. e.g. ht=1,time=S4", default="", type=metadata_str)
     parser.add_argument("-s", "--scaling-limits", type=int_tuple, default=(-1, -1), metavar='MIN_MAX',
                         help='the min and max values used for scaling')
@@ -575,7 +618,7 @@ def main(argv=None):
 
         it = dir_iterator(args.images)
         segment_all(it, args.output_dir, metadata, logger,
-                    crop=args.crop, pad=args.pad, crop_center=args.crop_center,
+                    crop=args.crop, pad=args.pad, include_unseg=args.include_unseg,
                     save_unseg=args.save_unseg, no_tifs=args.no_tifs)
     else:
         if args.campaign is None or args.ht_metadata is None or args.sample_metadata is None:
@@ -602,7 +645,7 @@ def main(argv=None):
                     print(outdir)
                 else:
                     segment_all(it, outdir, S_HT_md, logger,
-                                crop=args.crop, pad=args.pad, crop_center=args.crop_center,
+                                crop=args.crop, pad=args.pad, include_unseg=args.include_unseg,
                                 save_unseg=args.save_unseg, no_tifs=args.no_tifs)
         else:
             if args.campaign is not None:
@@ -617,7 +660,7 @@ def main(argv=None):
             else:
                 it = zip_iterator(args.images, all_paths, logger)
                 segment_all(it, outdir, metadata, logger,
-                            crop=args.crop, pad=args.pad, crop_center=args.crop_center,
+                            crop=args.crop, pad=args.pad, include_unseg=args.include_unseg,
                             save_unseg=args.save_unseg, no_tifs=args.no_tifs)
 
 
