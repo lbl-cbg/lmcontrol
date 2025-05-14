@@ -148,9 +148,11 @@ def main(argv=None):
         else:
             table.add_column(key, metadata_info[key]['description'], data=value.astype(float))
 
+    logger.info(f"Writing to {args.output_h5}")
     with get_hdf5io(args.output_h5, 'w') as io:
         io.write(table)
 
+    logger.info(f"DONE")
 
 if __name__ == "__main__":
     main()
