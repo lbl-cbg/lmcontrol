@@ -39,6 +39,39 @@ from .resnet import ResNet, Bottleneck, get_block, get_planes, get_layers
 from .utils import get_loaders
 
 
+class MultiViewTransform:
+    """Transforms an image into multiple views.
+
+    Args:
+        transforms:
+            A sequence of transforms. Every transform creates a new view.
+
+    """
+
+    def __init__(self, *transforms):
+        self.transforms = transforms
+
+    def __call__(self, image, mask):
+        """Transforms an image into multiple views.
+
+        Every transform in self.transforms creates a new view.
+
+        Args:
+            image:
+                Image to be transformed into multiple views.
+
+        Returns:
+            List of views.
+
+        """
+        images = list()
+        for transform in self.transforms:
+            tmp = transform(image, mask)
+            images.append(tmp[0])
+        return images
+        #return [transform(image, mask) for transform in self.transforms]
+
+
 class BYOL(L.LightningModule):
 
     # Note: The model and training settings do not follow the reference settings
@@ -214,14 +247,14 @@ def train(argv=None):
 
     logger.info(args)
 
-    train_transform = BYOLTransform(
-        view_1_transform=_get_transforms('float', 'norm', 'rotate', 'crop', 'hflip', 'vflip', 'rgb'),
-        view_2_transform=_get_transforms('float', 'norm', 'blur', 'rotate', 'crop', 'hflip', 'vflip', 'noise', 'rgb'),
+    train_transform = MultiViewTransform(
+        _get_transforms('float', 'norm', 'rotate', 'crop', 'hflip', 'vflip', 'rgb'),
+        _get_transforms('float', 'norm', 'blur', 'rotate', 'crop', 'hflip', 'vflip', 'noise', 'rgb'),
     )
 
-    val_transform = BYOLTransform(
-            view_1_transform=_get_transforms('float', 'norm', 'rotate', 'crop', 'hflip', 'vflip', 'rgb'),
-            view_2_transform=_get_transforms('float', 'norm', 'crop', 'rgb'),
+    val_transform = MultiViewTransform(
+            _get_transforms('float', 'norm', 'rotate', 'crop', 'hflip', 'vflip', 'rgb'),
+            _get_transforms('float', 'norm', 'crop', 'rgb'),
     )
 
     train_loader, val_loader = get_loaders(args,

@@ -13,38 +13,83 @@ from ..data_utils import encode_labels, load_npzs
 from ..utils import get_logger
 
 import torch
+import torch.nn as nn
+import torchvision.transforms.functional as TF
+from torchvision.transforms import InterpolationMode
 from torch.utils.data import Dataset
 
-class GaussianNoise(T._transform.Transform):
+
+class RGB(nn.Module):
+    """Convert image to three channels"""
+
+    @staticmethod
+    def to_rgb(image):
+        return image.repeat(3, 1, 1) if image.ndim == 3 else image.repeat(1, 3, 1, 1)
+
+    def forward(self, image, mask=None):
+        if mask is None:
+            return self.to_rgb(image)
+        return self.to_rgb(image), mask
+
+
+class Float(nn.Module):
+    """Convert to 32-bit floating point"""
+
+    def forward(self, image, mask=None):
+        if mask is None:
+            return image.to(torch.float32)
+        return image.to(torch.float32), mask
+
+
+class GaussianBlur(nn.Module):
+    """Performs Gaussian blurring on the image by given kernel"""
+    def __init__(self, kernel_size, sigma=(0.1, 2.0)):
+        super().__init__()
+        self.kernel_size = kernel_size
+        self.sigma_min = sigma[0]
+        self.sigma_max = sigma[1]
+
+    def forward(self, image, mask=None):
+        sigma = torch.empty(1).uniform_(self.sigma_min, self.sigma_max).item()
+        ret = TF.gaussian_blur(image, self.kernel_size, [sigma, sigma])
+        if mask is None:
+            return ret
+        return ret, mask
+
+
+class GaussianNoise(nn.Module):
     """Applies random Gaussian noise to a tensor.
 
     The intensity of the noise is dependent on the mean of the pixel values.
     See https://arxiv.org/pdf/2101.04909.pdf for more information.
-
     """
     def __init__(self, p=0.5, sigma=(6, 10)):
         super().__init__()
         self.p = p
         self.sigma = sigma
 
-    def __call__(self, sample: torch.Tensor) -> torch.Tensor:
+    def forward(self, image, mask=None):
+        ret = image
         if torch.rand(1)[0] < self.p:
-            mu = sample.to(float).mean()
+            mu = image.to(float).mean()
             snr = self.sigma
             if isinstance(self.sigma, tuple):
                 snr = torch.randint(low=self.sigma[0], high=self.sigma[1], size=(1,))
             sigma = mu.abs() / snr
-            noise = torch.normal(torch.zeros(sample.shape), sigma)
-            if sample.dtype == torch.uint8:
+            noise = torch.normal(torch.zeros(image.shape), sigma)
+            if image.dtype == torch.uint8:
                 noise = noise.to(torch.uint8)
-            return sample + noise
-        return sample
+            ret = image + noise
+        if mask is None:
+            return ret
+        return ret, mask
 
 
-class Norm(T._transform.Transform):
+class Norm(nn.Module):
     """Independently normalize images"""
 
     def __init__(self, scale=True):
+        super().__init__()
         self.scale = scale
 
     @staticmethod
@@ -56,12 +101,276 @@ class Norm(T._transform.Transform):
         else:
             return t.permute(*torch.arange(t.ndim - 1, -1, -1))
 
-    def __call__(self, sample: torch.Tensor) -> torch.Tensor:
-        ret = self.T(self.T(sample) - self.T(sample.mean(dim=(-2, -1))))
+    def forward(self, image, mask=None):
+        ret = self.T(self.T(image) - self.T(image.mean(dim=(-2, -1))))
         if self.scale:
             ret = self.T(self.T(ret) / self.T(torch.std(ret, dim=(-2, -1))))
-        return ret
+        if mask is None:
+            return ret
+        return ret, mask
 
+
+class MaskNorm(nn.Module):
+    """
+    Normalizes images using statistics calculated only from background pixels
+    as identified by the segmentation mask.
+    """
+
+    def __init__(self, eps=1e-8):
+        """
+        Args:
+            eps (float): Small constant added to std to avoid division by zero. Default: 1e-8
+        """
+        super().__init__()
+        self.eps = eps
+
+    def forward(self, image, mask=None):
+        """
+        Args:
+            image (Tensor): Image to be normalized, shape [C, H, W]
+            mask (Tensor): Segmentation mask, shape [1, H, W] or [H, W]
+
+        Returns:
+            Tensor, Tensor: Normalized image and unchanged mask
+        """
+        # Ensure mask has the right shape (add channel dim if needed)
+        if image.dim() == 2:
+            image = image.unsqueeze(0)
+
+        if mask.dim() == 2:
+            mask = mask.unsqueeze(0)
+
+        # Initialize result tensor
+        normalized_image = torch.zeros_like(image, dtype=torch.float)
+
+        # Normalize each channel separately
+        for c in range(image.shape[0]):
+            channel = image[c].to(torch.float)
+            ch_mask = mask[c].to(torch.float)
+            background_mask = (ch_mask == 0).nonzero()
+            # Extract background pixels for this channel
+            background_pixels = channel[background_mask]
+
+            # Check if we have enough background pixels
+            if background_pixels.numel() > 0:
+                # Calculate mean and std of background pixels
+                mean = background_pixels.mean()
+                std = background_pixels.std() + self.eps
+            else:
+                # Fallback if no background pixels found
+                mean = channel.mean(dtype=torch.float)
+                std = channel.std(dtype=torch.float) + self.eps
+
+            # Normalize the entire channel using background statistics
+            normalized_image[c] = (channel - mean) / std
+        return normalized_image, mask
+
+
+class RandomHorizontalFlip(nn.Module):
+    """Randomly flip images horizontally with a given probability."""
+
+    def __init__(self, p=0.5, generator=None):
+        """
+        Args:
+            p (float): Probability of applying the horizontal flip. Default: 0.5
+            generator (torch.Generator, optional): Generator for random number sampling
+        """
+        super().__init__()
+        self.p = p
+        self.generator = generator
+
+    def forward(self, image, mask=None):
+        """
+        Args:
+            image (Tensor): Image to be flipped
+            mask (Tensor): Mask to be flipped
+
+        Returns:
+            Tensor, Tensor: Transformed image and mask
+        """
+        flip = torch.rand(1, generator=self.generator).item() < self.p
+
+        if flip:
+            image = TF.hflip(image)
+        if mask is None:
+            return image
+        if flip:
+            mask = TF.hflip(mask)
+        return image, mask
+
+
+class RandomVerticalFlip(nn.Module):
+    """Randomly flip images vertically with a given probability."""
+
+    def __init__(self, p=0.5, generator=None):
+        """
+        Args:
+            p (float): Probability of applying the vertical flip. Default: 0.5
+            generator (torch.Generator, optional): Generator for random number sampling
+        """
+        super().__init__()
+        self.p = p
+        self.generator = generator
+
+    def forward(self, image, mask=None):
+        """
+        Args:
+            image (Tensor): Image to be flipped
+            mask (Tensor): Mask to be flipped
+
+        Returns:
+            Tensor, Tensor: Transformed image and mask
+        """
+        flip = torch.rand(1, generator=self.generator).item() < self.p
+
+        if flip:
+            image = TF.vflip(image)
+        if mask is None:
+            return image
+        if flip:
+            mask = TF.vflip(mask)
+        return image, mask
+
+
+
+class RandomRotation(nn.Module):
+    """Randomly rotate images within a given range of degrees."""
+
+    def __init__(self, max_degrees, generator=None):
+        """
+        Args:
+            max_degrees (float): Maximum rotation angle in degrees.
+                                 Will sample uniformly between 0 and max_degrees.
+            generator (torch.Generator, optional): Generator for random number sampling
+        """
+        super().__init__()
+        self.max_degrees = max_degrees
+        self.generator = generator
+
+    def forward(self, image, mask=None):
+        """
+        Args:
+            image (Tensor): Image to be rotated
+            mask (Tensor): Mask to be rotated
+
+        Returns:
+            Tensor, Tensor: Transformed image and mask
+        """
+        angle = torch.rand(1, generator=self.generator).item() * self.max_degrees
+
+        # Apply the same rotation to both image and mask
+        image = TF.rotate(image, angle, interpolation=InterpolationMode.BILINEAR)
+        if mask is None:
+            return image
+        mask = TF.rotate(mask, angle, interpolation=InterpolationMode.BILINEAR)
+        return image, mask
+
+
+class RandomCrop(nn.Module):
+
+    def __init__(self, size, generator=None):
+        """
+        Args:
+            generator (torch.Generator, optional): Generator for random number sampling
+        """
+        super().__init__()
+        self.size = size
+        self.generator = generator
+
+    @classmethod
+    def compute_upper_H_W(cls, mask):
+        # Get indices of non-zero elements
+        indices = torch.nonzero(mask, as_tuple=True)
+
+        # Calculate center as mean of indices
+        if indices[0].numel() > 0:
+            Xx, Xn = indices[0].max(), indices[0].min()
+            Yx, Yn = indices[1].max(), indices[1].min()
+            h = Xx - Xn
+            w = Yx - Yn
+            return Xn, Yn, h, w
+        else:
+            # Return center of image if mask is empty
+            h, w = mask.shape
+            return 0, 0, h, w
+
+    def forward(self, image, mask):
+        X, Y, H, W = self.compute_upper_H_W(mask[0])
+        tgt_H, tgt_W = self.size
+
+        if X == 0 and Y == 0 and H == image.shape[1] and W == image.shape[2]: # unsegmentable
+            Xn = torch.randint(0, H - tgt_H, (), generator=self.generator)
+            Yn = torch.randint(0, H - tgt_W, (), generator=self.generator)
+        else:
+            shift_H = torch.randint(0, tgt_H - H, (), generator=self.generator) if tgt_H > H else 0
+            shift_W = torch.randint(0, tgt_W - W, (), generator=self.generator) if tgt_W > W else 0
+            Xn = max(min(X - shift_H, image.shape[1] - tgt_H), 0)
+            Yn = max(min(Y - shift_W, image.shape[2] - tgt_W), 0)
+
+        Yx = Yn + tgt_W
+        Xx = Xn + tgt_H
+
+        if Yn < 0 or Xn < 0 or Yx > image.shape[2] or Xx > image.shape[1]:
+            breakpoint()
+            raise ValueError(f"Crop bounds {Xn}:{Xx}, {Yn}:{Yx} are out of bounds for image of shape {image.shape}")
+
+        return image[:, Xn:Xx, Yn:Yx], mask[:, Xn:Xx, Yn:Yx]
+
+
+class SequentialTwoInputs(nn.Module):
+    """A sequential container for modules that take two inputs and return two outputs.
+
+    Similar to nn.Sequential but designed for transformations that operate on pairs
+    of inputs (like image and mask).
+    """
+
+    def __init__(self, *args):
+        """
+        Args:
+            *args: Modules to be added to the container in the order they should be applied.
+        """
+        super(SequentialTwoInputs, self).__init__()
+        self.transforms = nn.ModuleList(args)
+
+    def forward(self, x1, x2):
+        """
+        Args:
+            x1: First input (e.g., image)
+            x2: Second input (e.g., mask)
+
+        Returns:
+            tuple: Transformed versions of both inputs
+        """
+        for transform in self.transforms:
+            x1, x2 = transform(x1, x2)
+        return x1, x2
+
+#    def __getitem__(self, idx):
+#        """Get a specific transformation or a slice of transformations.
+#
+#        Args:
+#            idx: Index or slice
+#
+#        Returns:
+#            Module or SequentialTwoInputs: The selected module(s)
+#        """
+#        if isinstance(idx, slice):
+#            return SequentialTwoInputs(*self.transforms[idx])
+#        else:
+#            return self.transforms[idx]
+#
+#    def __len__(self):
+#        """Return the number of transformations in the container."""
+#        return len(self.transforms)
+#
+#    def append(self, module):
+#        """Add a module to the end of the container.
+#
+#        Args:
+#            module: Module to add
+#        """
+#        self.transforms.append(module)
+#
 
 class LMDataset(Dataset):
     """
@@ -83,14 +392,14 @@ class LMDataset(Dataset):
     def is_regression(cls, label):
         return label in cls.__regression_labels
 
-    def __init__(self, path, label_classes=None, use_masks=False, return_labels=False, logger=None, transform=None,
+    def __init__(self, path, label_classes=None, return_labels=False, logger=None, transform=None,
                  label=None, n_samples=None, split=None, rand_split=False, exp_split=False, split_seed=None):
         """
         Args:
             path (str)                  : path to the HDMF DynamicTable file
             label_classes (dict)        : a dictionary of classes for each label
-            use_masks (bool)            : whether or not to use masks instead of images
-            return_labels (bool)        : whether or not to return labels for each data point
+            images (bool)               : whether or not to return images
+            use_return_labels (bool)    : whether or not to return labels for each data point
             logger (Logger)             : the logger to use when loading data
             transform (Transform)       : the transform to apply to each image
             label (str, list, tuple)    : the label(s) to return when getting a sample
@@ -110,7 +419,6 @@ class LMDataset(Dataset):
 
         self.path = path
 
-        self.use_masks = use_masks
         self.return_labels = return_labels
 
         if not isinstance(label, (tuple, list)):
@@ -157,10 +465,6 @@ class LMDataset(Dataset):
             self.io = get_hdf5io(self.path, 'r')
             self.table = self.io.read()
 
-            if self.use_masks:
-                self.data = self.table['masks'].data
-            else:
-                self.data = self.table['images'].data
 
             self.label_classes = dict()
 
@@ -177,7 +481,6 @@ class LMDataset(Dataset):
         self.io.close()
         self.table = None
         self.io = None
-        self.data = None
 
     def set_random_split(self, val_frac, test_frac, seed=None):
         if (val_frac + test_frac) >= 1.0:
@@ -217,9 +520,16 @@ class LMDataset(Dataset):
 
     def __getitem__(self, i):
         i = i if self.subset is None else self.subset[i]
-        ret = torch.as_tensor(self.data[i]).unsqueeze(0)
+
+        image = torch.as_tensor(self.table['images'].data[i]).unsqueeze(0)
+        mask = torch.as_tensor(self.table['masks'].data[i]).unsqueeze(0)
+
+        ret = image
         if self.transform is not None:
-            ret = self.transform(ret)
+            # TODO: self.transform should account for an image or an image plus mask.
+            # This is so we can do transformations with the segmentation mask
+            ret = self.transform(image, mask)
+
         if self.sample_labels is None:
             return ret
         else:
@@ -243,22 +553,17 @@ def extract_labels_from_filename(filename):
     return x_label, y_label
 
 
-def to_rgb(x):
-    return x.repeat(3, 1, 1) if x.ndim == 3 else x.repeat(1, 3, 1, 1)
-
-def to_float(x):
-    return x.to(torch.float32)
-
 TRANSFORMS = {
-        'blur': T.GaussianBlur(3, sigma=(0.01, 1.0)),
-        'rotate': T.RandomRotation(180),
-        'crop': T.CenterCrop((64, 64)),
-        'hflip': T.RandomHorizontalFlip(0.5),
-        'vflip': T.RandomVerticalFlip(0.5),
+        'blur': GaussianBlur(3, sigma=(0.01, 1.0)),
+        'rotate': RandomRotation(180),
+        'crop': RandomCrop((64, 64)),
+        'hflip': RandomHorizontalFlip(0.5),
+        'vflip': RandomVerticalFlip(0.5),
         'noise': GaussianNoise(sigma=(10, 12)),
-        'rgb': T.Lambda(to_rgb),
-        'float': T.Lambda(to_float),
+        'rgb': RGB(),
+        'float': Float(),
         'norm': Norm(),
+        'masknorm': MaskNorm(),
 }
 
 
@@ -292,7 +597,7 @@ def get_transforms(*transforms):
         if tfm not in TRANSFORMS:
             raise ValueError(f"Unrecognozed transform: '{tfm}'")
         ret.append(TRANSFORMS[tfm])
-    return ret[0] if len(ret) == 1 else T.Compose(ret)
+    return ret[0] if len(ret) == 1 else SequentialTwoInputs(*ret)
 
 
 

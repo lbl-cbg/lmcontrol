@@ -19,13 +19,20 @@ def get_loaders(args, inference=True, tfm=None, train_tfm=None, val_tfm=None, re
         if hasattr(args, attr):
             dset_kwargs[attr] = getattr(args, attr)
 
-    dl_kwargs = dict(num_workers=3, batch_size=args.batch_size,
-                     multiprocessing_context='spawn', persistent_workers=True)
+    if args.debug:
+        dl_kwargs = dict(batch_size=args.batch_size)
+    else:
+        dl_kwargs = dict(num_workers=5, batch_size=args.batch_size,
+                         multiprocessing_context='spawn', persistent_workers=True)
 
     if inference:
         logger.info(f"Loading inference data from {args.input}")
         dataset = LMDataset(args.input, transform=tfm, **dset_kwargs)
-        loader = DataLoader(dataset, worker_init_fn=dataset.open, **dl_kwargs)
+        if args.debug:
+            dataset.open()
+            loader = DataLoader(dataset, **dl_kwargs)
+        else:
+            loader = DataLoader(dataset, worker_init_fn=dataset.open, **dl_kwargs)
         return loader
     else:
         logger.info(f"Loading training data from {args.input}")
@@ -34,7 +41,13 @@ def get_loaders(args, inference=True, tfm=None, train_tfm=None, val_tfm=None, re
         logger.info(f"Loading validation data from {args.input}")
         val_dataset = LMDataset(args.input, transform=val_tfm, split='validation', **dset_kwargs)
 
-        train_loader = DataLoader(train_dataset, shuffle=True, worker_init_fn=train_dataset.open, **dl_kwargs)
-        val_loader = DataLoader(val_dataset, shuffle=False, worker_init_fn=val_dataset.open, **dl_kwargs)
+        if args.debug:
+            train_dataset.open()
+            val_dataset.open()
+            train_loader = DataLoader(train_dataset, shuffle=True, **dl_kwargs)
+            val_loader = DataLoader(val_dataset, shuffle=False, **dl_kwargs)
+        else:
+            train_loader = DataLoader(train_dataset, shuffle=True, worker_init_fn=train_dataset.open, **dl_kwargs)
+            val_loader = DataLoader(val_dataset, shuffle=False, worker_init_fn=val_dataset.open, **dl_kwargs)
 
         return train_loader, val_loader

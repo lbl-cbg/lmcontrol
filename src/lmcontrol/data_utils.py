@@ -43,6 +43,7 @@ def load_npzs(npzs, logger=None, n_samples=None, label_type=None):
 
         md_keys = set(npz.keys()) - {'paths', 'masks', 'images'}
         logger.info(f"Found the following keys in {npz_path}: {' '.join(sorted(md_keys))}")
+        logger.info(f"Image shape: {images[-1].shape} | Mask shape: {masks[-1].shape} | Path shape: {paths[-1].shape} ")
 
         for k in sorted(md_keys):
             if npz[k].ndim == 0:
