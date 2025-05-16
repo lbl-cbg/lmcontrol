@@ -262,7 +262,8 @@ def train(argv=None):
                                            train_tfm=train_transform,
                                            val_tfm=val_transform,
                                            exp_split=True,
-                                           return_labels=False)
+                                           return_labels=False,
+                                           logger=logger)
     model = BYOL()
     trainer = _get_trainer(args)
     logger.info(str(trainer))
