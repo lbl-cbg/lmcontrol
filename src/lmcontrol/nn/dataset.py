@@ -625,7 +625,8 @@ def make_masks(table, split_validation=False, validation_split_ratio=0.5, seed=N
         rep_tuples: List of representative tuples (campaign, condition, ht) in validation
         rep_tuples2: List of representative tuples in second validation set (if split_validation=True)
     """
-    mask = table['source'].data[:] == 1
+    val_sample = np.where(table['source'].elements.data[:] == 'sample')[0][0]
+    mask = table['source'].data[:] == val_sample
 
     campaign = table['campaign'].data[:][mask]
     condition = table['condition'].data[:][mask]
