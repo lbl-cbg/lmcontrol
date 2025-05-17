@@ -81,9 +81,10 @@ class BYOL(L.LightningModule):
     val_metric = "validation_ncs"
     train_metric = "train_ncs"
 
-    def __init__(self, lr=0.06, planes=[8, 16, 32, 64], layers=[1, 1, 1, 1], block=Bottleneck):
+    def __init__(self, max_epochs, lr=0.06, planes=[8, 16, 32, 64], layers=[1, 1, 1, 1], block=Bottleneck):
         super().__init__()
 
+        self.max_epochs = max_epochs
         self.lr = lr
         self.backbone = ResNet(block=block, layers=layers, planes=planes, num_outputs=0, return_embeddings=True)
         self.projection_head = BYOLProjectionHead(self.backbone.n_features, 1024, 256)
@@ -110,7 +111,7 @@ class BYOL(L.LightningModule):
         return z
 
     def training_step(self, batch, batch_idx):
-        momentum = cosine_schedule(self.current_epoch, 10, 0.996, 1)
+        momentum = cosine_schedule(self.current_epoch, self.max_epochs, 0.996, 1)
         update_momentum(self.backbone, self.backbone_momentum, m=momentum)
         update_momentum(self.projection_head, self.projection_head_momentum, m=momentum)
         (x0, x1) = batch
@@ -163,7 +164,7 @@ def _get_trainer(args, trial=None):
     callbacks = []
 
     targs = dict(num_nodes=args.num_nodes, max_epochs=args.epochs, devices=args.devices,
-                 accelerator="gpu" if args.devices > 0 else "cpu", check_val_every_n_epoch=4, callbacks=callbacks)
+                 accelerator="gpu" if args.devices > 0 else "cpu", check_val_every_n_epoch=2, callbacks=callbacks)
 
     if args.devices > 0:
         torch.set_float32_matmul_precision('medium')
@@ -179,9 +180,22 @@ def _get_trainer(args, trial=None):
         monitor="validation_ncs",
         mode="min",
         save_last=True,
-        every_n_epochs=2,
+        every_n_epochs=1,
+    )
+
+    ckpt_steps = 10 if args.quick else 1000
+
+    # Step-based checkpoint with step number in filename
+    step_checkpoint_callback = ModelCheckpoint(
+        dirpath=args.outdir,
+        filename="step-checkpoint-{step}",
+        save_top_k=1,                # Only keep 1 checkpoint
+        every_n_train_steps=ckpt_steps,
+        save_on_train_epoch_end=False,
+        save_weights_only=False,     # Save the full model
     )
     callbacks.append(checkpoint_callback)
+    callbacks.append(step_checkpoint_callback)
 
     early_stopping_callback = EarlyStopping(
         monitor="validation_ncs",
@@ -191,19 +205,17 @@ def _get_trainer(args, trial=None):
     )
     callbacks.append(early_stopping_callback)
 
-
     targs['logger'] = CSVLogger(args.outdir)
     if trial is not None :   # if 'trial' is passed in, assume we are using Optuna to do HPO
         if args.pruning:
             callbacks.append(PyTorchLightningPruningCallback(trial, monitor="combined_metric"))
-
     else:
         if args.wandb:
             wandb.init(project="lmcontrol",
                        config=vars(args))
             targs['logger'] = WandbLogger(project='lmcontrol', log_model=True)
 
-    if args.debug:
+    if args.quick:
         targs['limit_train_batches'] = 100
         targs['limit_val_batches'] = 10
 
@@ -222,7 +234,8 @@ def train(argv=None):
 
     parser.add_argument("-c","--checkpoint", type=str, help="path to the model checkpoint file to use for inference")
     parser.add_argument("-e", "--epochs", type=int, help="the number of epochs to run for", default=10)
-    parser.add_argument("-d", "--debug", action='store_true', help="run with a small dataset", default=False)
+    parser.add_argument("-d", "--debug", action='store_true', help="disable parallel data loading", default=False)
+    parser.add_argument("-q", "--quick", action='store_true', help="run with a small dataset", default=False)
     parser.add_argument("-o", "--outdir", type=str, help="the directory to save output to", default='.')
     parser.add_argument("-N", "--n_samples", type=int, help="number of samples to use from each NPZ", default=None)
     parser.add_argument("--early_stopping", action='store_true', help="enable early stopping", default=False)
@@ -264,7 +277,10 @@ def train(argv=None):
                                            exp_split=True,
                                            return_labels=False,
                                            logger=logger)
-    model = BYOL()
+
+    logger.info(f"{len(train_loader.dataset)} training samples, {len(val_loader.dataset)} validation samples")
+
+    model = BYOL(args.epochs)
     trainer = _get_trainer(args)
     logger.info(str(trainer))
     trainer.fit(model, train_loader, val_loader)
