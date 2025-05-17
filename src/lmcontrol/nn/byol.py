@@ -3,6 +3,7 @@ import copy
 import glob
 import os
 import sys
+import math
 
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning, message=".*ToTensor().*")
@@ -13,7 +14,7 @@ import wandb
 import lightning as L
 from lightning.pytorch.loggers import WandbLogger, CSVLogger
 from lightning.pytorch.callbacks.early_stopping import EarlyStopping
-from lightning.pytorch.callbacks import ModelCheckpoint
+from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
 from lightning.pytorch.strategies import DDPStrategy
 
 import numpy as np
@@ -81,10 +82,15 @@ class BYOL(L.LightningModule):
     val_metric = "validation_ncs"
     train_metric = "train_ncs"
 
-    def __init__(self, lr=0.06, planes=[8, 16, 32, 64], layers=[1, 1, 1, 1], block=Bottleneck):
+    def __init__(self, total_steps, base_lr=0.01, min_lr=0.0001, planes=[8, 16, 32, 64], layers=[1, 1, 1, 1], block=Bottleneck):
         super().__init__()
 
-        self.lr = lr
+        self.total_steps = total_steps
+        self.base_lr = base_lr
+        self.min_lr = min_lr
+
+        self.base_momentum = 0.996
+        self.final_momentum = 1.0
         self.backbone = ResNet(block=block, layers=layers, planes=planes, num_outputs=0, return_embeddings=True)
         self.projection_head = BYOLProjectionHead(self.backbone.n_features, 1024, 256)
         self.prediction_head = BYOLPredictionHead(256, 1024, 256)
@@ -96,6 +102,12 @@ class BYOL(L.LightningModule):
         deactivate_requires_grad(self.projection_head_momentum)
 
         self.criterion = NegativeCosineSimilarity()
+
+    def cosine_lr_schedule(self, step, total_steps, start_value, end_value):
+        """Cosine schedule for either learning rate or momentum."""
+        return end_value + 0.5 * (start_value - end_value) * (
+            1 + math.cos(math.pi * step / total_steps)
+        )
 
     def forward(self, x):
         y = self.backbone(x).flatten(start_dim=1)
@@ -110,7 +122,7 @@ class BYOL(L.LightningModule):
         return z
 
     def training_step(self, batch, batch_idx):
-        momentum = cosine_schedule(self.current_epoch, 10, 0.996, 1)
+        momentum = cosine_schedule(self.global_step, self.total_steps, self.base_momentum, self.final_momentum)
         update_momentum(self.backbone, self.backbone_momentum, m=momentum)
         update_momentum(self.projection_head, self.projection_head_momentum, m=momentum)
         (x0, x1) = batch
@@ -137,21 +149,17 @@ class BYOL(L.LightningModule):
         return self.backbone(x).flatten(start_dim=1)
 
     def configure_optimizers(self):
-        optimizer = torch.optim.SGD(self.parameters(), lr=self.lr)
-
-        # Define the scheduler with milestones at epochs 10 and 20
-        scheduler = torch.optim.lr_scheduler.MultiStepLR(
-            optimizer,
-            milestones=[5, 10],  # Reduce LR at epochs 10 and 20
-            gamma=0.1,            # Reduce by factor of 10 each time
-        )
-
-        # Return both the optimizer and the scheduler
+        optimizer = torch.optim.SGD(self.parameters(), lr=self.base_lr) #, momentum=0.9, weight_decay=1e-4)
+        scheduler = torch.optim.lr_scheduler.LambdaLR(
+                optimizer,
+                lr_lambda=lambda step: self.cosine_lr_schedule(
+                    step, self.total_steps, 1.0, self.min_lr/self.base_lr)
+            )
         return {
             "optimizer": optimizer,
             "lr_scheduler": {
                 "scheduler": scheduler,
-                "interval": "epoch",  # Call scheduler after each epoch
+                'interval': "step",
                 "frequency": 1,       # Call scheduler every epoch
             }
         }
@@ -163,7 +171,7 @@ def _get_trainer(args, trial=None):
     callbacks = []
 
     targs = dict(num_nodes=args.num_nodes, max_epochs=args.epochs, devices=args.devices,
-                 accelerator="gpu" if args.devices > 0 else "cpu", check_val_every_n_epoch=4, callbacks=callbacks)
+                 accelerator="gpu" if args.devices > 0 else "cpu", check_val_every_n_epoch=2, callbacks=callbacks)
 
     if args.devices > 0:
         torch.set_float32_matmul_precision('medium')
@@ -179,31 +187,44 @@ def _get_trainer(args, trial=None):
         monitor="validation_ncs",
         mode="min",
         save_last=True,
-        every_n_epochs=2,
+        every_n_epochs=1,
+    )
+
+    ckpt_steps = 10 if args.quick else 1000
+
+    # Step-based checkpoint with step number in filename
+    step_checkpoint_callback = ModelCheckpoint(
+        dirpath=args.outdir,
+        filename="step-checkpoint-{step}",
+        save_top_k=1,                # Only keep 1 checkpoint
+        every_n_train_steps=ckpt_steps,
+        save_on_train_epoch_end=False,
+        save_weights_only=False,     # Save the full model
     )
     callbacks.append(checkpoint_callback)
+    callbacks.append(step_checkpoint_callback)
+
+    callbacks.append(LearningRateMonitor(logging_interval='step', log_momentum=True, log_weight_decay=True))
 
     early_stopping_callback = EarlyStopping(
         monitor="validation_ncs",
-        patience=5,
+        patience=20,
         min_delta=0.001,
         mode="min"
     )
     callbacks.append(early_stopping_callback)
 
-
     targs['logger'] = CSVLogger(args.outdir)
     if trial is not None :   # if 'trial' is passed in, assume we are using Optuna to do HPO
         if args.pruning:
             callbacks.append(PyTorchLightningPruningCallback(trial, monitor="combined_metric"))
-
     else:
         if args.wandb:
             wandb.init(project="lmcontrol",
                        config=vars(args))
             targs['logger'] = WandbLogger(project='lmcontrol', log_model=True)
 
-    if args.debug:
+    if args.quick:
         targs['limit_train_batches'] = 100
         targs['limit_val_batches'] = 10
 
@@ -222,7 +243,8 @@ def train(argv=None):
 
     parser.add_argument("-c","--checkpoint", type=str, help="path to the model checkpoint file to use for inference")
     parser.add_argument("-e", "--epochs", type=int, help="the number of epochs to run for", default=10)
-    parser.add_argument("-d", "--debug", action='store_true', help="run with a small dataset", default=False)
+    parser.add_argument("-d", "--debug", action='store_true', help="disable parallel data loading", default=False)
+    parser.add_argument("-q", "--quick", action='store_true', help="run with a small dataset", default=False)
     parser.add_argument("-o", "--outdir", type=str, help="the directory to save output to", default='.')
     parser.add_argument("-N", "--n_samples", type=int, help="number of samples to use from each NPZ", default=None)
     parser.add_argument("--early_stopping", action='store_true', help="enable early stopping", default=False)
@@ -264,7 +286,14 @@ def train(argv=None):
                                            exp_split=True,
                                            return_labels=False,
                                            logger=logger)
-    model = BYOL()
+
+    logger.info(f"{len(train_loader.dataset)} training samples, {len(val_loader.dataset)} validation samples")
+
+    dataset_size = len(train_loader.dataset)
+    batches_per_epoch = math.ceil(dataset_size / args.batch_size)
+    total_steps = args.epochs * batches_per_epoch
+
+    model = BYOL(total_steps)
     trainer = _get_trainer(args)
     logger.info(str(trainer))
     trainer.fit(model, train_loader, val_loader)
