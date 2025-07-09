@@ -82,7 +82,7 @@ class BYOL(L.LightningModule):
     val_metric = "validation_ncs"
     train_metric = "train_ncs"
 
-    def __init__(self, total_steps, base_lr=0.01, min_lr=0.0001, planes=[8, 16, 32, 64], layers=[1, 1, 1, 1], block=Bottleneck):
+    def __init__(self, total_steps=None, base_lr=0.01, min_lr=0.0001, planes=[8, 16, 32, 64], layers=[1, 1, 1, 1], block=Bottleneck):
         super().__init__()
 
         self.total_steps = total_steps
@@ -261,6 +261,12 @@ def train(argv=None):
 
     args = parser.parse_args(argv)
 
+    if args.num_nodes == 0:
+        args.num_nodes = int(os.environ.get('SLURM_NNODES'))
+        if args.num_nodes is None:
+            print("Unable to determine number of nodes. Make sure you are running in a SLURM job environment when setting --num_nodes=0", file=sys.stderr)
+            exit(1)
+
     args.block = get_block(args.block)
     args.planes = get_planes(args.planes)
     args.layers = get_planes(args.layers)
@@ -270,13 +276,13 @@ def train(argv=None):
     logger.info(args)
 
     train_transform = MultiViewTransform(
-        _get_transforms('float', 'norm', 'rotate', 'crop', 'hflip', 'vflip', 'rgb'),
-        _get_transforms('float', 'norm', 'blur', 'rotate', 'crop', 'hflip', 'vflip', 'noise', 'rgb'),
+        _get_transforms('float', 'norm', 'rotate', 'random_crop', 'hflip', 'vflip', 'rgb'),
+        _get_transforms('float', 'norm', 'blur', 'rotate', 'random_crop', 'hflip', 'vflip', 'noise', 'rgb'),
     )
 
     val_transform = MultiViewTransform(
-            _get_transforms('float', 'norm', 'rotate', 'crop', 'hflip', 'vflip', 'rgb'),
-            _get_transforms('float', 'norm', 'crop', 'rgb'),
+            _get_transforms('float', 'norm', 'rotate', 'random_crop', 'hflip', 'vflip', 'rgb'),
+            _get_transforms('float', 'norm', 'random_crop', 'rgb'),
     )
 
     train_loader, val_loader = get_loaders(args,
@@ -294,9 +300,10 @@ def train(argv=None):
     total_steps = args.epochs * batches_per_epoch
 
     model = BYOL(total_steps)
+
     trainer = _get_trainer(args)
     logger.info(str(trainer))
-    trainer.fit(model, train_loader, val_loader)
+    trainer.fit(model, train_loader, val_loader, ckpt_path=args.checkpoint)
 
 def predict(argv=None):
 
@@ -316,7 +323,7 @@ def predict(argv=None):
     args = parser.parse_args(argv)
 
     logger = get_logger('info')
-    transform = _get_transforms('float', 'norm', 'crop', 'rgb')
+    transform = _get_transforms('float', 'norm', 'center_crop', 'rgb')
 
 
     loader = get_loaders(args,
