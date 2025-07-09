@@ -1,5 +1,4 @@
 import argparse
-import cv2
 import glob
 import io
 import os
@@ -13,6 +12,7 @@ import json
 
 from typing import Dict, Iterable, Any, Tuple, Optional
 
+import flowkit as fk
 from numba import njit
 import numpy as np
 import scipy.ndimage as ndi
@@ -331,8 +331,10 @@ def dir_iterator(image_dir, logger):
     image_paths = glob.glob(os.path.join(image_dir, "*.tif"))
     logger.info(f"Found {len(image_paths)} images in {image_dir}")
     for tif in tqdm(image_paths):
-        image = sio.imread(tif)[:, :, 0]
-        yield image_path, image
+        image = sio.imread(tif)
+        if image.ndim == 3:
+            image = image[:, :, 0]
+        yield tif, image
 
 def list_zip_files(zip_file_path):
     with ZipFile(zip_file_path, 'r') as zip_file:
@@ -416,6 +418,10 @@ def pad_images_to_max_size(image_list, padval=None):
     return padded_images
 
 
+def extract_event(path):
+    return int(os.path.basename(path)[:-4].split('_')[-1])
+
+
 def segment_all(
         images: Iterable,
         output_dir: str,
@@ -426,6 +432,7 @@ def segment_all(
         include_unseg: bool = False,
         save_unseg: bool = False,
         no_tifs: bool = False,
+        fcs_path: str = None,
 ):
     dir_exists = False # only create unseg directory if there were any unsegmentable images
     unseg_dir = os.path.join(output_dir, 'unseg')
@@ -448,12 +455,13 @@ def segment_all(
 
     shapes = set()
     n_total_imgs = 0
+    events = list()
     for image_path, image in images:
         n_total_imgs += 1
         try:
             shapes.add(image.shape)
             # Check for bad images caused by flow-cytometer and/or imaging errors
-            if image.std() > 15:
+            if image.std() / image.mean() > 0.15:
                 raise UnsegmentableError("StdDev of pixels is quite high, this is probably a bad image")
             mask = outlier_cluster(image)
             if not no_tifs:
@@ -488,6 +496,7 @@ def segment_all(
                 seg_images.append(segi)
                 seg_masks.append(segm)
             continue
+        events.append(extract_event(image_path))
 
     logger.info(f"Done segmenting images. {n_unseg} ({100 * n_unseg / n_total_imgs:.1f}%) images were unsegmentable")
 
@@ -499,6 +508,12 @@ def segment_all(
     seg_images = np.array(seg_images, dtype=np.uint8)
     seg_masks = np.array(seg_masks, dtype=np.uint8)
     paths = np.array(paths)
+
+    if fcs_path is not None:
+        sample_df = fk.Sample(fcs_path).as_dataframe(source='raw').iloc[events]
+        metadata = metadata.copy()
+        for c in sample_df.columns:
+            metadata[c[0]] = sample_df[c].values
 
     os.makedirs(output_dir, exist_ok=True)
     # Save segmented original images
@@ -582,9 +597,9 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=desc, epilog=epi)
     parser.add_argument("images", type=str, help='The directory containing images to crop')
     parser.add_argument("output_dir", type=str, help='The directory to save cropped images to')
-    parser.add_argument('campaign', help='The campaign name', default=None)
-    parser.add_argument('ht_metadata', type=spreadsheet, help='a spreadsheet with metadata about HTs', default=None)
-    parser.add_argument('sample_metadata', type=spreadsheet, help='a spreadsheet with metadata about samples', default=None)
+    parser.add_argument('campaign', help='The campaign name', default=None, nargs='?')
+    parser.add_argument('ht_metadata', type=spreadsheet, help='a spreadsheet with metadata about HTs', default=None, nargs='?')
+    parser.add_argument('sample_metadata', type=spreadsheet, help='a spreadsheet with metadata about samples', default=None, nargs='?')
     parser.add_argument("-u", "--save-unseg", action='store_true', default=False,
                         help="Save unsegmentable images in output_dir under directory 'unseg'")
     parser.add_argument("-U", "--include-unseg", action='store_true', default=False,
@@ -600,6 +615,7 @@ def main(argv=None):
                         help='the min and max values used for scaling')
     parser.add_argument("-S", "--source", type=str, choices=('sample', 'water', 'background'), default='sample',
                         help='the source of the image(s)')
+    parser.add_argument("-F", "--fcs", type=str, default=None, help='the FCS file with flow cytometry data')
     parser.add_argument("-d", "--debug", action='store_true', default=False,
                         help="Print output directory names and exit")
 
@@ -617,10 +633,10 @@ def main(argv=None):
 
         metadata = default_metadata | args.metadata
 
-        it = dir_iterator(args.images)
+        it = dir_iterator(args.images, logger)
         segment_all(it, args.output_dir, metadata, logger,
                     crop=args.crop, pad=args.pad, include_unseg=args.include_unseg,
-                    save_unseg=args.save_unseg, no_tifs=args.no_tifs)
+                    save_unseg=args.save_unseg, no_tifs=args.no_tifs, fcs_path=args.fcs)
     else:
         if args.campaign is None or args.ht_metadata is None or args.sample_metadata is None:
             logger.error("If providing a Zip file, you must specify the campaign and provide metadata for HTs and Samples")
