@@ -114,7 +114,6 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=desc, epilog=epi)
     parser.add_argument("output_h5", help="the path of the HDF5 to write images to")
     parser.add_argument("npzs", nargs="+", help="the NPZ files with cropped images to merge")
-    parser.add_argument("-n", "--namespace_path", help="The namespace specification file to use", default=None)
     parser.add_argument("-f", "--force", action='store_true', default=False, help="ignore checks, just write my file")
 
     args = parser.parse_args(argv)
@@ -133,20 +132,33 @@ def main(argv=None):
                          description='Single cell images from ABPDU',
                          id=np.arange(len(masks)))
 
-    table.add_column('images', 'Cropped single cell images', data=images.astype('uint8'))
+    table.add_column('images', 'Cropped single cell images', data=images)
     table.add_column('masks', 'The segmentation masks for each image', data=masks.astype('uint8'))
     table.add_column('paths', 'the original file path for the raw image', data=paths)
+    missing_desc = list()
     for key, value in metadata.items():
         if key not in metadata:
             logger.warning(f"Skipping key '{key}' - Not found in metadata info")
             continue
 
+        if key not in metadata_info:
+            missing_desc.append(key)
+            continue
         if metadata_info[key]['enum']:
             enc = LabelEncoder().fit(value)
             value = enc.transform(value).astype(np.uint64)
             table.add_column(key, metadata_info[key]['description'], data=value, enum=enc.classes_)
         else:
             table.add_column(key, metadata_info[key]['description'], data=value.astype(float))
+
+    if len(missing_desc) > 0:
+        missing_desc = ", ".join(missing_desc)
+        if args.force:
+            logger.info(f"Ignoring the following columns due to missing metadata: {missing_desc}")
+        else:
+            msg = f"The following keys do not have metadata info. Use --force flag to ignore them, or add their metadata info src/lmcontrol/metadata_info.yaml\n{missing_desc}"
+            logger.info(msg)
+            exit(1)
 
     logger.info(f"Writing to {args.output_h5}")
     with get_hdf5io(args.output_h5, 'w') as io:
