@@ -515,6 +515,7 @@ def segment_all(
 
     if fcs_sample_df is not None:
         metadata = metadata.copy()
+        fcs_sample_df = fcs_sample_df.iloc[events]
         for c in fcs_sample_df.columns:
             if c[0] == "ImageFlag":
                 continue
