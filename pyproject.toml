@@ -45,6 +45,7 @@ dependencies = [
     "wandb",
     "openpyxl",
     "hdmf-ai",
+    "FlowKit",
 ]
 
 dynamic = ["version"]
