@@ -31,3 +31,90 @@ scale_min:
 source:
   description: the source of this sampl--water, background, or sample--where sample indicates a sample from the bioreactor
   enum: true
+FSC-A:
+  description: "Forward Scatter Area - integrated signal indicating cell size"
+  enum: false
+SSC-A:
+  description: "Side Scatter Area - integrated signal indicating cell granularity and internal complexity"
+  enum: false
+BL1-A:
+  description: "Blue Laser Channel 1 Area - integrated fluorescence signal from first blue laser emission filter (typically 488nm excitation)"
+  enum: false
+BL2-A:
+  description: "Blue Laser Channel 2 Area - integrated fluorescence signal from second blue laser emission filter (typically 488nm excitation)"
+  enum: false
+BL3-A:
+  description: "Blue Laser Channel 3 Area - integrated fluorescence signal from third blue laser emission filter (typically 488nm excitation)"
+  enum: false
+YL4-A:
+  description: "Yellow Laser Channel 4 Area - integrated fluorescence signal from fourth yellow laser emission filter (typically 561nm excitation)"
+  enum: false
+YL3-A:
+  description: "Yellow Laser Channel 3 Area - integrated fluorescence signal from third yellow laser emission filter (typically 561nm excitation)"
+  enum: false
+YL2-A:
+  description: "Yellow Laser Channel 2 Area - integrated fluorescence signal from second yellow laser emission filter (typically 561nm excitation)"
+  enum: false
+YL1-A:
+  description: "Yellow Laser Channel 1 Area - integrated fluorescence signal from first yellow laser emission filter (typically 561nm excitation)"
+  enum: false
+FSC-H:
+  description: "Forward Scatter Height - maximum signal intensity indicating cell size"
+  enum: false
+SSC-H:
+  description: "Side Scatter Height - maximum signal intensity indicating cell granularity and internal complexity"
+  enum: false
+BL1-H:
+  description: "Blue Laser Channel 1 Height - maximum fluorescence signal intensity from first blue laser emission filter"
+  enum: false
+BL2-H:
+  description: "Blue Laser Channel 2 Height - maximum fluorescence signal intensity from second blue laser emission filter"
+  enum: false
+BL3-H:
+  description: "Blue Laser Channel 3 Height - maximum fluorescence signal intensity from third blue laser emission filter"
+  enum: false
+YL4-H:
+  description: "Yellow Laser Channel 4 Height - maximum fluorescence signal intensity from fourth yellow laser emission filter"
+  enum: false
+YL3-H:
+  description: "Yellow Laser Channel 3 Height - maximum fluorescence signal intensity from third yellow laser emission filter"
+  enum: false
+YL2-H:
+  description: "Yellow Laser Channel 2 Height - maximum fluorescence signal intensity from second yellow laser emission filter"
+  enum: false
+YL1-H:
+  description: "Yellow Laser Channel 1 Height - maximum fluorescence signal intensity from first yellow laser emission filter"
+  enum: false
+FSC-W:
+  description: "Forward Scatter Width - time duration of signal pulse, used for doublet discrimination and cell size assessment"
+  enum: false
+SSC-W:
+  description: "Side Scatter Width - time duration of signal pulse, used for doublet discrimination"
+  enum: false
+BL1-W:
+  description: "Blue Laser Channel 1 Width - time duration of fluorescence signal pulse from first blue laser emission filter"
+  enum: false
+BL2-W:
+  description: "Blue Laser Channel 2 Width - time duration of fluorescence signal pulse from second blue laser emission filter"
+  enum: false
+BL3-W:
+  description: "Blue Laser Channel 3 Width - time duration of fluorescence signal pulse from third blue laser emission filter"
+  enum: false
+YL4-W:
+  description: "Yellow Laser Channel 4 Width - time duration of fluorescence signal pulse from fourth yellow laser emission filter"
+  enum: false
+YL3-W:
+  description: "Yellow Laser Channel 3 Width - time duration of fluorescence signal pulse from third yellow laser emission filter"
+  enum: false
+YL2-W:
+  description: "Yellow Laser Channel 2 Width - time duration of fluorescence signal pulse from second yellow laser emission filter"
+  enum: false
+YL1-W:
+  description: "Yellow Laser Channel 1 Width - time duration of fluorescence signal pulse from first yellow laser emission filter"
+  enum: false
+Time:
+  description: "The time of flow cytometer event"
+  enum: false
+Event:
+  description: "The flow cytometer event number"
+  enum: false

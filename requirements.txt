@@ -20,3 +20,4 @@ hdmf
 opencv-python
 imagecodecs
 openpyxl
+git+https://github.com/lbl-cbg/FlowKit.git
