@@ -328,22 +328,32 @@ def extract_s_ht_to_tif_mapping(zip_filepath):
     return s_ht_to_tifs
 
 
-def dir_iterator(image_dir, logger):
-    image_paths = glob.glob(os.path.join(image_dir, "*.tif"))
-    logger.info(f"Found {len(image_paths)} images in {image_dir}")
-    for tif in tqdm(image_paths):
+def get_indices(downsample, n, rng):
+    if isinstance(downsample, (float, np.floating)):
+        downsample = int(downsample * n)
+    assert isinstance(downsample, (int, np.integer))
+    return rng.permutation(n)[:downsample]
+
+
+def dir_iterator(image_dir, logger, downsample=None, rng=None):
+    paths = glob.glob(os.path.join(image_dir, "*.tif"))
+    if downsample is not None:
+        indices = get_indices(downsample, len(paths), rng)
+        logger.info(f"Downsampling to {len(indices)} of {len(paths)} images")
+        paths = np.array(paths)[indices]
+    logger.info(f"Found {len(paths)} images in {image_dir}")
+    for tif in tqdm(paths):
         image = sio.imread(tif)
         if image.ndim == 3:
             image = image[:, :, 0]
         yield tif, image
 
-def list_zip_files(zip_file_path):
-    with ZipFile(zip_file_path, 'r') as zip_file:
-        zip_contents = zip_file.namelist()
-        files_only = [name for name in zip_contents if not name.endswith('/')]
-    return files_only
 
-def zip_iterator(zip_path, paths, logger):
+def zip_iterator(zip_path, paths, logger, downsample=None, rng=None):
+    if downsample is not None:
+        indices = get_indices(downsample, len(paths), rng)
+        logger.info(f"Downsampling to {len(indices)} of {len(paths)} images")
+        paths = np.array(paths)[indices]
     logger.info(f"Loading {len(paths)} images from {zip_path}")
     with ZipFile(zip_path, 'r') as zip_ref:
         for tiff_path in tqdm(paths):
@@ -358,6 +368,7 @@ def zip_iterator(zip_path, paths, logger):
                 if array.ndim == 3:
                     array = array[:, :, 0]
                 yield tiff_path, array
+
 
 def build_metadata(campaign, ht_metadata, sample_metadata, **defaults):
 
@@ -446,7 +457,6 @@ def segment_all(
     orig_seg_images = list()
     n_unseg = 0
 
-
     logger.info(f"Saving segmented images to {output_dir}")
     if save_unseg:
         logger.info(f"Saving any unsegmented images to {unseg_dir}")
@@ -502,7 +512,7 @@ def segment_all(
                 events.append(extract_event(image_path))
             continue
 
-    logger.info(f"Done segmenting images. {n_unseg} ({100 * n_unseg / n_total_imgs:.1f}%) images were unsegmentable")
+    logger.info(f"Done segmenting images. {n_unseg} / {n_total_imgs} ({100 * n_unseg / n_total_imgs:.2g}%) images were unsegmentable")
 
 
     if crop is None and len(shapes) > 1:
@@ -573,6 +583,13 @@ def make_dir(output_dir, metadata, digest):
 
     dirs.append(digest)
     return os.path.join(*dirs)
+
+
+def list_zip_files(zip_file_path):
+    with ZipFile(zip_file_path, 'r') as zip_file:
+        zip_contents = zip_file.namelist()
+        files_only = [name for name in zip_contents if not name.endswith('/')]
+    return files_only
 
 
 def parse_acs_zip(zip_path):
@@ -657,6 +674,10 @@ def main(argv=None):
     parser.add_argument("-F", "--fcs", type=str, default=None, help='the FCS file with flow cytometry data')
     parser.add_argument("-d", "--debug", action='store_true', default=False,
                         help="Print output directory names and exit")
+    parser.add_argument("-D", "--downsample", type=str, default=None,
+                        help="randomly downsample by specified fraction or to specified number of images")
+    parser.add_argument("--seed", type=int, default=None,
+                        help="the seed for randomly downsampling")
 
     args = parser.parse_args(argv)
 
@@ -665,6 +686,14 @@ def main(argv=None):
     default_metadata = dict(scale_min=args.scaling_limits[0], scale_max=args.scaling_limits[1],
                             manual_scaling=0 if args.scaling_limits == (-1, -1) else 1,
                             source=args.source)
+
+    rng = None
+    if args.downsample is not None:
+        try:
+            args.downsample = int(args.downsample)
+        except ValueError:
+            args.downsample = float(args.downsample)
+        rng = np.random.default_rng(args.seed)
 
     if os.path.isdir(args.images):
         if args.campaign is not None:
@@ -676,7 +705,7 @@ def main(argv=None):
         if args.fcs is not None:
             fcs_sample_df = check_fcs(args.fcs)
 
-        it = dir_iterator(args.images, logger)
+        it = dir_iterator(args.images, logger, downsample=args.downsample, rng=rng)
         segment_all(it, args.output_dir, metadata, logger,
                     crop=args.crop, pad=args.pad, include_unseg=args.include_unseg,
                     save_unseg=args.save_unseg, save_tifs=args.save_tifs, fcs_sample_df=fcs_sample_df)
@@ -684,7 +713,7 @@ def main(argv=None):
         fcs_sample_df, tif_paths = parse_acs_zip(args.images)
 
         if fcs_sample_df is not None:
-            it = zip_iterator(args.images, tif_paths, logger)
+            it = zip_iterator(args.images, tif_paths, logger, downsample=args.downsample, rng=rng)
             metadata = default_metadata | args.metadata
             segment_all(it, args.output_dir, metadata, logger,
                         crop=args.crop, pad=args.pad, include_unseg=args.include_unseg,
@@ -706,7 +735,7 @@ def main(argv=None):
 
                 for s, ht in all_paths:
                     paths = all_paths[(s, ht)]
-                    it = zip_iterator(args.images, paths, logger)
+                    it = zip_iterator(args.images, paths, logger, downsample=args.downsample, rng=rng)
                     S_HT_md = metadata[f"S{s}_HT{ht}"]
 
                     outdir = make_dir(args.output_dir, S_HT_md, uniq_dir(base_hasher, paths))
@@ -727,7 +756,7 @@ def main(argv=None):
                 if args.debug:
                     print(outdir)
                 else:
-                    it = zip_iterator(args.images, all_paths, logger)
+                    it = zip_iterator(args.images, all_paths, logger, downsample=args.downsample, rng=rng)
                     segment_all(it, outdir, metadata, logger,
                                 crop=args.crop, pad=args.pad, include_unseg=args.include_unseg,
                                 save_unseg=args.save_unseg, save_tifs=args.save_tifs)

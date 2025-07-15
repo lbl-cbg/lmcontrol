@@ -311,7 +311,6 @@ class RandomCrop(nn.Module):
         Xx = Xn + tgt_H
 
         if Yn < 0 or Xn < 0 or Yx > image.shape[2] or Xx > image.shape[1]:
-            breakpoint()
             raise ValueError(f"Crop bounds {Xn}:{Xx}, {Yn}:{Yx} are out of bounds for image of shape {image.shape}")
 
         return image[:, Xn:Xx, Yn:Yx], mask[:, Xn:Xx, Yn:Yx]
@@ -529,6 +528,8 @@ class LMDataset(Dataset):
             # TODO: self.transform should account for an image or an image plus mask.
             # This is so we can do transformations with the segmentation mask
             ret = self.transform(image, mask)
+            if isinstance(self.transform, SequentialTwoInputs):
+                ret = ret[0]
 
         if self.sample_labels is None:
             return ret
@@ -556,7 +557,8 @@ def extract_labels_from_filename(filename):
 TRANSFORMS = {
         'blur': GaussianBlur(3, sigma=(0.01, 1.0)),
         'rotate': RandomRotation(180),
-        'crop': RandomCrop((64, 64)),
+        'random_crop': RandomCrop((64, 64)),
+        'center_crop': T.CenterCrop((64, 64)),
         'hflip': RandomHorizontalFlip(0.5),
         'vflip': RandomVerticalFlip(0.5),
         'noise': GaussianNoise(sigma=(10, 12)),
@@ -571,20 +573,21 @@ def get_transforms(*transforms):
     """Return a transforms appropriate for Ambr light microscopy data
 
     The following transforms and their respective keys are:
-        norm:       Normalize the image by subtracting the mean pixel value from
-                    image
-        blur:       A Gaussian Blur
-        rotate:     Random rotation of up to 180 degrees in either direction
-        crop:       Center crop images to 64x64 pixels
-        hflip:      Random horizontal rotation with probability of 0.5
-        vflip:      Random vertical rotation with probability of 0.5
-        noise:      Randomly apply noise with probability of 0.5. Noise magnitude
-                    will be between 10-12 signal-to-noise ratio
-        rgb:        Convert to RGB format i.e. 3 channels
-        float:      Convert to torch.Float dtype
+        norm:           Normalize the image by subtracting the mean pixel value from
+                        image
+        blur:           A Gaussian Blur
+        rotate:         Random rotation of up to 180 degrees in either direction
+        random_crop:    Random crop around center to 64x64 pixels
+        center_crop:    Center crop images to 64x64 pixels
+        hflip:          Random horizontal rotation with probability of 0.5
+        vflip:          Random vertical rotation with probability of 0.5
+        noise:          Randomly apply noise with probability of 0.5. Noise magnitude
+                        will be between 10-12 signal-to-noise ratio
+        rgb:            Convert to RGB format i.e. 3 channels
+        float:          Convert to torch.Float dtype
 
     Args:
-        transforms: the list of transforms to get. Valid options are 'blur', 'rotate', 'crop',
+        transforms: the list of transforms to get. Valid options are 'blur', 'rotate', 'random_crop',
                     'hflip', 'vflip', 'noise', 'rgb', 'float', 'norm'
     Returns:
         a single transform or a Compose object pipeline with transforms in the order they

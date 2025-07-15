@@ -6,7 +6,7 @@ from .utils import get_logger, get_metadata_info
 from .data_utils import load_npzs
 
 from hdmf.spec import GroupSpec, DatasetSpec, NamespaceBuilder
-from hdmf.backends.hdf5 import HDF5IO
+from hdmf.backends.hdf5 import HDF5IO, H5DataIO
 from hdmf.common import DynamicTable, load_namespaces, get_hdf5io
 import numpy as np
 from sklearn.preprocessing import LabelEncoder
@@ -115,6 +115,7 @@ def main(argv=None):
     parser.add_argument("output_h5", help="the path of the HDF5 to write images to")
     parser.add_argument("npzs", nargs="+", help="the NPZ files with cropped images to merge")
     parser.add_argument("-f", "--force", action='store_true', default=False, help="ignore checks, just write my file")
+    parser.add_argument("-c", "--compress", action='store_true', default=False, help="compress images and masks")
 
     args = parser.parse_args(argv)
 
@@ -132,8 +133,13 @@ def main(argv=None):
                          description='Single cell images from ABPDU',
                          id=np.arange(len(masks)))
 
+    if args.compress:
+        images = H5DataIO(images, compression='gzip', chunks=(100, 152, 152))
+        masks = H5DataIO(masks.astype('uint8'), compression='gzip')
+    else:
+        masks = masks.astype('uint8')
     table.add_column('images', 'Cropped single cell images', data=images)
-    table.add_column('masks', 'The segmentation masks for each image', data=masks.astype('uint8'))
+    table.add_column('masks', 'The segmentation masks for each image', data=masks)
     table.add_column('paths', 'the original file path for the raw image', data=paths)
     missing_desc = list()
     for key, value in metadata.items():
