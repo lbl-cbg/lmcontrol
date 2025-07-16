@@ -13,6 +13,7 @@ def get_loaders(args, inference=True, tfm=None, train_tfm=None, val_tfm=None, re
                        logger=logger,
                        return_labels=return_labels,
                        exp_split=exp_split,
+                       rand_split=not exp_split,
                        split_seed=args.split_seed)
 
     for attr in ('label', ):
