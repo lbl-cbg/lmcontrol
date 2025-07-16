@@ -2,7 +2,6 @@ import sys
 
 # function 'norm ' has been modified. Please keep a check of it.
 import numpy as np
-from lightly.data import LightlyDataset
 import torch
 from torch.utils.data import Dataset
 import torchvision.transforms.v2 as T
@@ -394,6 +393,7 @@ class LMDataset(Dataset):
     def __init__(self, path, label_classes=None, return_labels=False, logger=None, transform=None,
                  label=None, n_samples=None, split=None, rand_split=False, exp_split=False, split_seed=None):
         """
+
         Args:
             path (str)                  : path to the HDMF DynamicTable file
             label_classes (dict)        : a dictionary of classes for each label
@@ -411,6 +411,7 @@ class LMDataset(Dataset):
                                           exp_split is short for "experimental split"
 
         """
+        # When exp_split == False and rand_split == False, no there is not split.
         if rand_split and exp_split:
             raise ValueError("rand_split and exp_split cannot both be True")
 
@@ -603,15 +604,6 @@ def get_transforms(*transforms):
     return ret[0] if len(ret) == 1 else SequentialTwoInputs(*ret)
 
 
-
-def get_lightly_dataset(npzs, transform=None, **lmdset_kwargs):
-    """Helper function for getting a LightlyDataset"""
-    dataset = LMDataset(npzs, **lmdset_kwargs)
-    return LightlyDataset.from_torch_dataset(dataset,
-                                             transform=transform,
-                                             index_to_filename=dataset.index_to_filename)
-
-
 def make_masks(table, split_validation=False, validation_split_ratio=0.5, seed=None):
     """
     Creates masks for training and validation splits using only numpy.
@@ -628,15 +620,26 @@ def make_masks(table, split_validation=False, validation_split_ratio=0.5, seed=N
         rep_tuples: List of representative tuples (campaign, condition, ht) in validation
         rep_tuples2: List of representative tuples in second validation set (if split_validation=True)
     """
-    val_sample = np.where(table['source'].elements.data[:] == 'sample')[0][0]
-    mask = table['source'].data[:] == val_sample
+    if 'source' in table:
+        val_sample = np.where(table['source'].elements.data[:] == 'sample')[0][0]
+        mask = table['source'].data[:] == val_sample
+    else:
+        mask = np.s_[:]
 
-    campaign = table['campaign'].data[:][mask]
-    condition = table['condition'].data[:][mask]
-    ht = table['ht'].data[:][mask]
+    if 'campaign' in table:
+        campaign = table['campaign'].data[:][mask]
+    else:
+        campaign = np.array(['fake_campaign'] * (len(table) if isinstance(mask, slice) else mask.sum()))
 
     # Get unique campaigns and potentially split them
     unique_campaigns = np.sort(np.unique(campaign))
+    if split_validation and len(unique_campaigns) == 1:
+        msg = ("Cannot split based on campaigns, since there is only a single campaign present.\n"
+               "You must include a 'campaign' column with two or more campaigns to split based on experimental metadata")
+        raise ValueError(msg)
+
+    condition = table['condition'].data[:][mask]
+    ht = table['ht'].data[:][mask]
 
     if split_validation:
         # Randomly shuffle campaigns for splitting

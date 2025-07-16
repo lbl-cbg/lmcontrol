@@ -30,7 +30,6 @@ from torch import nn
 from lightly.loss import NegativeCosineSimilarity
 from lightly.models.modules import BYOLPredictionHead, BYOLProjectionHead
 from lightly.models.utils import deactivate_requires_grad, update_momentum
-from lightly.transforms.byol_transform import BYOLTransform
 from lightly.utils.scheduler import cosine_schedule
 from optuna.integration import PyTorchLightningPruningCallback
 
@@ -181,7 +180,7 @@ def _get_trainer(args, trial=None):
 
     # should we use r2 score and val_accuracy for measurement
     checkpoint_callback = ModelCheckpoint(
-        dirpath=args.outdir,
+        dirpath=os.path.join(args.outdir, 'best_ckpt'),
         filename="checkpoint-{epoch:02d}-{validation_ncs:.4f}",
         save_top_k=3,
         monitor="validation_ncs",
@@ -194,7 +193,7 @@ def _get_trainer(args, trial=None):
 
     # Step-based checkpoint with step number in filename
     step_checkpoint_callback = ModelCheckpoint(
-        dirpath=args.outdir,
+        dirpath=os.path.join(args.outdir, 'step_ckpt'),
         filename="step-checkpoint-{step}",
         save_top_k=1,                # Only keep 1 checkpoint
         every_n_train_steps=ckpt_steps,
@@ -258,6 +257,7 @@ def train(argv=None):
     parser.add_argument("--strategy", type=str, help="type of strategy for trainer", default="auto")
     parser.add_argument("-g", "--devices", type=int, help="number of devices for trainer", default=1)
     parser.add_argument("-n", "--num_nodes", type=int, help="number of nodes for trainer", default=1)
+    parser.add_argument("--exp-split", action='store_true', default=False, help="split samples using experimental conditions, otherwise randomly")
 
     args = parser.parse_args(argv)
 
@@ -289,7 +289,7 @@ def train(argv=None):
                                            inference=False,
                                            train_tfm=train_transform,
                                            val_tfm=val_transform,
-                                           exp_split=True,
+                                           exp_split=args.exp_split,
                                            return_labels=False,
                                            logger=logger)
 
