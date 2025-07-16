@@ -2,7 +2,7 @@ from datetime import datetime
 import logging
 import sys
 
-from pkg_resources import resource_filename
+from importlib import resources
 import yaml
 
 def parse_logger(string, stream=sys.stderr, level='info'):
@@ -25,9 +25,9 @@ def get_logger(level='info'):
 
 
 def get_metadata_info():
-    file_path = resource_filename(__package__, 'metadata_info.yaml')
-    with open(file_path, 'r') as file:
-        data = yaml.safe_load(file)
+    with resources.as_file(resources.files(__package__) / 'metadata_info.yaml') as file_path:
+        with open(file_path, 'r') as file:
+            data = yaml.safe_load(file)
     return data
 
 
