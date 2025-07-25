@@ -17,7 +17,9 @@ optuna
 wandb
 optuna-integration[pytorch_lightning]
 hdmf
+git+https://github.com/hdmf-dev/hdmf-ai
 opencv-python
 imagecodecs
 openpyxl
 git+https://github.com/lbl-cbg/FlowKit.git
+--extra-index-url=https://pypi.nvidia.com "cuml-cu12==25.6.*"
