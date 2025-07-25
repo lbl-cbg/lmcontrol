@@ -14,7 +14,7 @@ import wandb
 import lightning as L
 from lightning.pytorch.loggers import WandbLogger, CSVLogger
 from lightning.pytorch.callbacks.early_stopping import EarlyStopping
-from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
+from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor, Timer
 from lightning.pytorch.strategies import DDPStrategy
 
 import numpy as np
@@ -33,7 +33,7 @@ from lightly.models.utils import deactivate_requires_grad, update_momentum
 from lightly.utils.scheduler import cosine_schedule
 from optuna.integration import PyTorchLightningPruningCallback
 
-from ..utils import get_logger, parse_seed
+from ..utils import get_logger, parse_seed, format_time_diff
 from .dataset import LMDataset, get_transforms as _get_transforms
 from .resnet import ResNet, Bottleneck, get_block, get_planes, get_layers
 from .utils import get_loaders
@@ -164,10 +164,12 @@ class BYOL(L.LightningModule):
         }
 
 
-def _get_trainer(args, trial=None):
+def _get_trainer(args, trial=None, extra_callbacks=None):
     accelerator = "gpu" if torch.cuda.is_available() else "cpu"
 
     callbacks = []
+    if extra_callbacks is not None and len(extra_callbacks) > 0:
+        callbacks.extend(extra_callbacks)
 
     targs = dict(num_nodes=args.num_nodes, max_epochs=args.epochs, devices=args.devices,
                  accelerator="gpu" if args.devices > 0 else "cpu", check_val_every_n_epoch=2, callbacks=callbacks)
@@ -301,9 +303,15 @@ def train(argv=None):
 
     model = BYOL(total_steps)
 
-    trainer = _get_trainer(args)
+    timer = Timer()
+    trainer = _get_trainer(args, extra_callbacks=[timer])
     logger.info(str(trainer))
     trainer.fit(model, train_loader, val_loader, ckpt_path=args.checkpoint)
+
+    total = timer.time_elapsed('train') + timer.time_elapsed('validate')
+    logger.info(f"Took {total}")
+    logger.info(f"  - training: {format_time_diff(timer.time_elapsed('train'))}")
+    logger.info(f"  - validation: {format_time_diff(timer.time_elapsed('validate'))}")
 
 def predict(argv=None):
 
@@ -356,6 +364,9 @@ def predict(argv=None):
 
     t.add_embedding(predictions,
                     description="ResNet features")
+
+    if dataset.table is None:
+        dataset.open()
 
     if args.add_viz:
         if accelerator == "gpu":
