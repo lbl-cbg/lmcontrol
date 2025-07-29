@@ -1,6 +1,16 @@
+import os
 import sys
 
+import torch
 from torch.utils.data import DataLoader
+
+import lightning as L
+from lightning.pytorch.loggers import WandbLogger, CSVLogger
+from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint, LearningRateMonitor
+from optuna.integration import PyTorchLightningPruningCallback
+from lightning.pytorch.strategies import DDPStrategy
+
+import wandb
 
 from .dataset import LMDataset
 from ..utils import get_logger
@@ -13,6 +23,7 @@ def get_loaders(args, inference=True, tfm=None, train_tfm=None, val_tfm=None, re
                        logger=logger,
                        return_labels=return_labels,
                        exp_split=exp_split,
+                       rand_split=not exp_split,
                        split_seed=args.split_seed)
 
     for attr in ('label', ):
@@ -51,3 +62,74 @@ def get_loaders(args, inference=True, tfm=None, train_tfm=None, val_tfm=None, re
             val_loader = DataLoader(val_dataset, shuffle=False, worker_init_fn=val_dataset.open, **dl_kwargs)
 
         return train_loader, val_loader
+
+
+def get_trainer(args, monitor, mode='min', trial=None, extra_callbacks=None):
+    accelerator = "gpu" if torch.cuda.is_available() else "cpu"
+
+    callbacks = []
+    if extra_callbacks is not None and len(extra_callbacks) > 0:
+        callbacks.extend(extra_callbacks)
+
+    targs = dict(num_nodes=args.num_nodes, max_epochs=args.epochs, devices=args.devices,
+                 accelerator="gpu" if args.devices > 0 else "cpu", check_val_every_n_epoch=2, callbacks=callbacks)
+
+    if args.devices > 0:
+        torch.set_float32_matmul_precision('medium')
+
+    if args.devices > 1:  # If using multiple GPUs, use Distributed Data Parallel (DDP)
+        targs['strategy'] = DDPStrategy(find_unused_parameters=True)
+
+    # should we use r2 score and val_accuracy for measurement
+    checkpoint_callback = ModelCheckpoint(
+        dirpath=os.path.join(args.outdir, 'best_ckpt'),
+        filename="checkpoint-{epoch:02d}-{%s:.4f}" % monitor,
+        save_top_k=3,
+        monitor=monitor,
+        mode=mode,
+        save_last=True,
+        every_n_epochs=1,
+    )
+
+    ckpt_steps = 10 if args.quick else 1000
+
+    # Step-based checkpoint with step number in filename
+    step_checkpoint_callback = ModelCheckpoint(
+        dirpath=os.path.join(args.outdir, 'step_ckpt'),
+        filename="step-checkpoint-{step}",
+        save_top_k=1,                # Only keep 1 checkpoint
+        every_n_train_steps=ckpt_steps,
+        save_on_train_epoch_end=False,
+        save_weights_only=False,     # Save the full model
+    )
+    callbacks.append(checkpoint_callback)
+    callbacks.append(step_checkpoint_callback)
+
+    callbacks.append(LearningRateMonitor(logging_interval='step', log_momentum=True, log_weight_decay=True))
+
+    early_stopping_callback = EarlyStopping(
+        monitor=monitor,
+        patience=20,
+        min_delta=0.001,
+        mode=mode
+    )
+    callbacks.append(early_stopping_callback)
+
+    targs['logger'] = CSVLogger(args.outdir)
+    if trial is not None :   # if 'trial' is passed in, assume we are using Optuna to do HPO
+        if args.pruning:
+            callbacks.append(PyTorchLightningPruningCallback(trial, monitor="combined_metric"))
+    else:
+        if args.wandb:
+            wandb.init(project="lmcontrol",
+                       config=vars(args))
+            targs['logger'] = WandbLogger(project='lmcontrol', log_model=True)
+
+    if args.quick:
+        targs['limit_train_batches'] = 100
+        targs['limit_val_batches'] = 10
+
+    return L.Trainer(**targs)
+
+
+
