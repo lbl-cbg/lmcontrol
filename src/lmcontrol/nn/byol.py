@@ -9,13 +9,10 @@ import warnings
 warnings.filterwarnings("ignore", category=UserWarning, message=".*ToTensor().*")
 warnings.filterwarnings("ignore", category=UserWarning, message=".*EnumData.*")
 
-import wandb
 
 import lightning as L
 from lightning.pytorch.loggers import WandbLogger, CSVLogger
-from lightning.pytorch.callbacks.early_stopping import EarlyStopping
-from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor, Timer
-from lightning.pytorch.strategies import DDPStrategy
+from lightning.pytorch.callbacks import Timer
 
 import numpy as np
 
@@ -36,7 +33,7 @@ from optuna.integration import PyTorchLightningPruningCallback
 from ..utils import get_logger, parse_seed, format_time_diff
 from .dataset import LMDataset, get_transforms as _get_transforms
 from .resnet import ResNet, Bottleneck, get_block, get_planes, get_layers
-from .utils import get_loaders
+from .utils import get_loaders, get_trainer
 
 
 class MultiViewTransform:
@@ -164,74 +161,6 @@ class BYOL(L.LightningModule):
         }
 
 
-def _get_trainer(args, trial=None, extra_callbacks=None):
-    accelerator = "gpu" if torch.cuda.is_available() else "cpu"
-
-    callbacks = []
-    if extra_callbacks is not None and len(extra_callbacks) > 0:
-        callbacks.extend(extra_callbacks)
-
-    targs = dict(num_nodes=args.num_nodes, max_epochs=args.epochs, devices=args.devices,
-                 accelerator="gpu" if args.devices > 0 else "cpu", check_val_every_n_epoch=2, callbacks=callbacks)
-
-    if args.devices > 0:
-        torch.set_float32_matmul_precision('medium')
-
-    if args.devices > 1:  # If using multiple GPUs, use Distributed Data Parallel (DDP)
-        targs['strategy'] = DDPStrategy(find_unused_parameters=True)
-
-    # should we use r2 score and val_accuracy for measurement
-    checkpoint_callback = ModelCheckpoint(
-        dirpath=os.path.join(args.outdir, 'best_ckpt'),
-        filename="checkpoint-{epoch:02d}-{validation_ncs:.4f}",
-        save_top_k=3,
-        monitor="validation_ncs",
-        mode="min",
-        save_last=True,
-        every_n_epochs=1,
-    )
-
-    ckpt_steps = 10 if args.quick else 1000
-
-    # Step-based checkpoint with step number in filename
-    step_checkpoint_callback = ModelCheckpoint(
-        dirpath=os.path.join(args.outdir, 'step_ckpt'),
-        filename="step-checkpoint-{step}",
-        save_top_k=1,                # Only keep 1 checkpoint
-        every_n_train_steps=ckpt_steps,
-        save_on_train_epoch_end=False,
-        save_weights_only=False,     # Save the full model
-    )
-    callbacks.append(checkpoint_callback)
-    callbacks.append(step_checkpoint_callback)
-
-    callbacks.append(LearningRateMonitor(logging_interval='step', log_momentum=True, log_weight_decay=True))
-
-    early_stopping_callback = EarlyStopping(
-        monitor="validation_ncs",
-        patience=20,
-        min_delta=0.001,
-        mode="min"
-    )
-    callbacks.append(early_stopping_callback)
-
-    targs['logger'] = CSVLogger(args.outdir)
-    if trial is not None :   # if 'trial' is passed in, assume we are using Optuna to do HPO
-        if args.pruning:
-            callbacks.append(PyTorchLightningPruningCallback(trial, monitor="combined_metric"))
-    else:
-        if args.wandb:
-            wandb.init(project="lmcontrol",
-                       config=vars(args))
-            targs['logger'] = WandbLogger(project='lmcontrol', log_model=True)
-
-    if args.quick:
-        targs['limit_train_batches'] = 100
-        targs['limit_val_batches'] = 10
-
-    return L.Trainer(**targs)
-
-
 def train(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("input", help="HDMF input file")
@@ -241,6 +170,7 @@ def train(argv=None):
     grp.add_argument("--val_frac", type=float, default=None, help="Part of data to use for training (between 0 and 1)")
 
     parser.add_argument("--split-seed", type=parse_seed, help="seed for dataset splits", default='')
+    parser.add_argument("--exp-split", action='store_true', default=False, help="split samples using experimental conditions, otherwise randomly")
 
     parser.add_argument("-c","--checkpoint", type=str, help="path to the model checkpoint file to use for inference")
     parser.add_argument("-e", "--epochs", type=int, help="the number of epochs to run for", default=10)
@@ -255,11 +185,9 @@ def train(argv=None):
     parser.add_argument("--block", type=str, choices=['BasicBlock', 'Bottleneck'], help="type of block to use in the model", default='Bottleneck')
     parser.add_argument("--planes", type=str, choices=['3', '4'], help="list of number of planes for each layer", default='4')
     parser.add_argument("--layers", type=str, choices=['1', '2', '3', '4'], help="list of number of layers in each stage", default='4')
-    parser.add_argument("--accelerator", type=str, help="type of accelerator for trainer", default="gpu")
     parser.add_argument("--strategy", type=str, help="type of strategy for trainer", default="auto")
     parser.add_argument("-g", "--devices", type=int, help="number of devices for trainer", default=1)
     parser.add_argument("-n", "--num_nodes", type=int, help="number of nodes for trainer", default=1)
-    parser.add_argument("--exp-split", action='store_true', default=False, help="split samples using experimental conditions, otherwise randomly")
 
     args = parser.parse_args(argv)
 
@@ -304,7 +232,7 @@ def train(argv=None):
     model = BYOL(total_steps)
 
     timer = Timer()
-    trainer = _get_trainer(args, extra_callbacks=[timer])
+    trainer = get_trainer(args, monitor='validation_ncs', extra_callbacks=[timer])
     logger.info(str(trainer))
     trainer.fit(model, train_loader, val_loader, ckpt_path=args.checkpoint)
 
