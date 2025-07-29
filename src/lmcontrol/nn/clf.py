@@ -2,7 +2,6 @@ import argparse
 import glob
 import pickle
 import os
-from typing import Type, Union, List, Optional, Callable, Any
 
 from functools import partial
 import lightning as L
@@ -15,21 +14,27 @@ import glob
 import numpy as np
 
 import optuna
+import lightning as L
 
+import wandb
+from lightning.pytorch.loggers import WandbLogger, CSVLogger
 from sklearn.metrics import accuracy_score, precision_score, recall_score, confusion_matrix
+from lightning.pytorch.callbacks import EarlyStopping
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
-from lightning.pytorch.callbacks import Timer
+from lightning.pytorch.callbacks import ModelCheckpoint
 from torchvision.models.resnet import BasicBlock, Bottleneck
+from typing import Type, Union, List, Optional, Callable, Any
+from optuna.integration import PyTorchLightningPruningCallback
 
-from ..utils import get_logger, parse_seed, format_time_diff
+from ..utils import get_logger
 from ..data_utils import load_npzs, encode_labels
 from .dataset import LMDataset, get_transforms as _get_transforms
 from .resnet import ResNet, add_args as add_resnet_args
-from .utils import get_loaders, get_trainer
+from .utils import get_loaders
 
 
 class MultiLabelLoss(nn.Module):
@@ -56,10 +61,10 @@ class CrossEntropy(nn.Module):
         return self.nlll(torch.log(input), target)
 
 
-time_weight = 0.9
-
 class LightningResNet(L.LightningModule):
 
+    val_metric = "validation_ncs"
+    train_metric = "train_ncs"
 
     loss_functions = {
         'time': nn.MSELoss(),
@@ -68,45 +73,33 @@ class LightningResNet(L.LightningModule):
         'feed': CrossEntropy(),
         'starting_media': CrossEntropy()
     }
-    loss_weights = {
-        'time': time_weight,
-        'sample': 0,
-        'condition': 0,
-        'feed': 1-time_weight,
-        'starting_media': 0
-    }
 
 
     def __init__(self, label_classes, lr=0.01, step_size=2, gamma=0.1, planes=[8, 16, 32, 64],
                  layers=[1, 1, 1, 1], block=BasicBlock, return_embeddings=False, time_weight=1e-3):
         super().__init__()
 
+        self.loss_weights = {
+            'time': time_weight,
+            'sample': 0,
+            'condition': 0,
+            'feed': 1-time_weight,
+            'starting_media': 0
+        }
+
+
         self.label_classes = label_classes
+
+        self.activations = [nn.Sequential(nn.Softplus(), nn.Flatten(start_dim=0)) if LMDataset.is_regression(l) else nn.Softmax(dim=1)
+                            for l in self.label_classes]
 
         self.label_counts = [1 if x is None else len(x) for x in self.label_classes.values()]
 
         self.num_outputs = sum(self.label_counts)
 
-        self.weighted_multilabel = False
+        self.criterion = MultiLabelLoss([self.loss_functions[l] for l in self.label_classes],
+                                        weights=[self.loss_weights[l] for l in self.label_classes])
 
-        if self.num_outputs == len(self.label_classes):
-            # Assume mult-label with the same loss type
-            self.criterion = nn.MSELoss()
-            self.activations = None
-        else:
-            self.weighted_multilabel = True
-            # Keep this here, since it's for multilabel loss when we have different loss types
-            self.criterion = MultiLabelLoss([self.loss_functions.get(l, nn.MSELoss()) for l in self.label_classes],
-                                            weights=[self.loss_weights.get(l, 1.0) for l in self.label_classes])
-            self.activations = list()
-            for l in self.label_classes:
-                if LMDataset.is_regression(l):
-                    if l == 'time':
-                        self.activations.append(nn.Sequential(nn.Softplus(), nn.Flatten(start_dim=0)))
-                    else:
-                        self.activations.append(nn.Flatten(start_dim=0))
-                else:
-                    self.activations.append(nn.Softmax(dim=1))
 
         self.backbone = ResNet(block=block, layers=layers, planes=planes, num_outputs=self.num_outputs,
                                return_embeddings=return_embeddings)
@@ -122,8 +115,7 @@ class LightningResNet(L.LightningModule):
 
     def forward(self, x):
         outputs = self.backbone(x)
-        if self.weighted_multilabel:
-            # If we are doing multi-label
+        if not self.return_embeddings:
             ret = list()
             start_idx = 0
             for act, count in zip(self.activations, self.label_counts):
@@ -132,6 +124,7 @@ class LightningResNet(L.LightningModule):
                 start_idx = end_idx
             return tuple(ret)
         else:
+
             return outputs
 
 
@@ -170,37 +163,19 @@ class LightningResNet(L.LightningModule):
     def training_step(self, batch, batch_idx):
         images, labels = batch
         outputs = self.forward(images)
-
-        total_loss = self.criterion(outputs, labels)
-
-        if isinstance(self.criterion, MultiLabelLoss):
-            # Keep this here, since it's for multilabel loss when we have different loss types
-            loss_components = self.criterion(outputs, labels)
-            self._score("train", outputs, loss_components, labels)
-            total_loss = sum(loss_components)
-            self.log('total_train_loss', total_loss, on_step=False, on_epoch=True)
-        else:
-            self.log('train_loss', total_loss, on_step=False, on_epoch=True)
-
-
-        return total_loss
+        loss_components = self.criterion(outputs, labels)
+        self._score("train", outputs, loss_components, labels)
+        total_loss = sum(loss_components)
+        self.log('total_train_loss', total_loss, on_step=False, on_epoch=True)
 
 
     def validation_step(self, batch, batch_idx):
         images, labels = batch
         outputs = self.forward(images)
-
-        total_loss = self.criterion(outputs, labels)
-
-        if isinstance(self.criterion, MultiLabelLoss):
-            # Keep this here, since it's for multilabel loss when we have different loss types
-            loss_components = self.criterion(outputs, labels)
-            self._score("val", outputs, loss_components, labels)
-            total_loss = sum(loss_components)
-            self.log('total_val_loss', total_loss, on_step=False, on_epoch=True)
-        else:
-            self.log('val_loss', total_loss, on_step=False, on_epoch=True)
-
+        loss_components = self.criterion(outputs, labels)
+        self._score("val", outputs, loss_components, labels)
+        total_loss = sum(loss_components)
+        self.log('total_val_loss', total_loss, on_step=False, on_epoch=True)
         return total_loss
 
     def configure_optimizers(self):
@@ -232,31 +207,26 @@ def get_layers(layers_cmd):
 
 
 def _add_training_args(parser):
-    parser.add_argument("input", help="HDMF input file")
-    parser.add_argument('label', type=str, nargs='+', choices=['fcs', 'time', 'feed', 'starting_media', 'condition', 'sample'], help="the label to train with")
+    parser.add_argument('label', type=str, nargs='+', choices=['time', 'feed', 'starting_media', 'condition', 'sample'], help="the label to train with")
+    parser.add_argument("--training", type=str, nargs='+', required=True, help="directories containing training data")
 
     grp = parser.add_mutually_exclusive_group()
     grp.add_argument("--validation", type=str, nargs='+', help="directories containing validation data")
     grp.add_argument("--val_frac", type=float, default=None, help="Part of data to use for training (between 0 and 1)")
-
-    parser.add_argument("--split-seed", type=parse_seed, help="seed for dataset splits", default=None)
-    parser.add_argument("--exp-split", action='store_true', default=False, help="split samples using experimental conditions, otherwise randomly")
+    parser.add_argument("--seed", type=int, default=None, help="seed for training-validation-test split")
 
     parser.add_argument("-c","--checkpoint", type=str, help="path to the model checkpoint file to use for inference")
-    parser.add_argument("-q", "--quick", action='store_true', help="run with a small dataset", default=False)
     parser.add_argument("-e", "--epochs", type=int, help="the number of epochs to run for", default=10)
     parser.add_argument("-d", "--debug", action='store_true', help="run with a small dataset", default=False)
     parser.add_argument("-o", "--outdir", type=str, help="the directory to save output to", default='.')
-    parser.add_argument("-N", "--n_samples", type=int, help="number of samples to use from each NPZ", default=None)
+    parser.add_argument("-n", "--n_samples", type=int, help="number of samples to use from each NPZ", default=None)
     parser.add_argument("--early_stopping", action='store_true', help="enable early stopping", default=False)
-    parser.add_argument("--wandb", action='store_false', default=False, help="provide this flag to stop wandb")
+    parser.add_argument("--wandb", action='store_false', default=True, help="provide this flag to stop wandb")
     parser.add_argument("--lr", type=float, help="learning rate", default=0.001)
     parser.add_argument("--step_size", type=int, help="step size for learning rate scheduler", default=10)
     parser.add_argument("--gamma", type=float, help="gamma for learning rate scheduler", default=0.1)
-    parser.add_argument("-b", "--batch_size", type=int, help="batch size for training and validation", default=32)
+    parser.add_argument("--batch_size", type=int, help="batch size for training and validation", default=32)
     parser.add_argument("--time_weight", type=float, help="loss function weight for time", default=0.001)
-    parser.add_argument("-g", "--devices", type=int, help="number of devices for trainer", default=1)
-    parser.add_argument("-n", "--num_nodes", type=int, help="number of nodes for trainer", default=1)
 
     add_resnet_args(parser)
 
@@ -264,21 +234,49 @@ def _add_training_args(parser):
 
 
 def _get_loaders_and_model(args,  logger=None):
-    train_transform = _get_transforms('float', 'norm','blur','rotate', 'random_crop','hflip', 'vflip', 'noise', 'rgb')
-    val_transform = _get_transforms('float', 'norm','blur','rotate', 'random_crop','hflip', 'vflip', 'noise', 'rgb')
+    train_transform = _get_transforms('float', 'norm','blur','rotate', 'crop','hflip', 'vflip', 'noise', 'rgb')
+    val_transform = _get_transforms('float', 'norm','blur','rotate', 'crop','hflip', 'vflip', 'noise', 'rgb')
 
     train_loader, val_loader = get_loaders(args,
-                                           inference=False,
                                            train_tfm=train_transform,
                                            val_tfm=val_transform,
-                                           return_labels=True,
-                                           exp_split=args.exp_split)
+                                           return_labels=False)
 
 
-    model = LightningResNet(train_loader.dataset.label_classes, lr=args.lr, step_size=args.step_size, gamma=args.gamma,
+    model = LightningResNet(train_dataset.label_classes, lr=args.lr, step_size=args.step_size, gamma=args.gamma,
                             block=args.block, planes=args.planes, layers=args.layers, return_embeddings=args.return_embeddings, time_weight=args.time_weight)
 
     return train_loader, val_loader, model
+
+
+def _get_trainer(args, trial=None):
+    accelerator = "gpu" if torch.cuda.is_available() else "cpu"
+
+    callbacks = []
+
+    targs = dict(max_epochs=args.epochs, devices=1, accelerator=accelerator, check_val_every_n_epoch=4, callbacks=callbacks)
+
+    if args.checkpoint:
+        checkpoint_callback = ModelCheckpoint(
+            dirpath=args.checkpoint,
+            filename="checkpoint-{epoch:02d}-{total_val_loss:.4f}",
+            save_top_k=3,
+            monitor="total_val_loss",
+            mode="min"
+        )
+        callbacks.append(checkpoint_callback)
+
+    if trial is not None :
+        targs['logger'] = CSVLogger(args.outdir, name=args.experiment)
+        if args.pruning:
+            callbacks.append(PyTorchLightningPruningCallback(trial, monitor="combined_metric"))
+
+    else:
+        if args.wandb:
+            wandb.init(project="SX_HTY_Run1")
+            targs['logger'] = WandbLogger(project='your_project_name', log_model=True)
+
+    return L.Trainer(**targs)
 
 
 def train(argv=None):
@@ -293,14 +291,8 @@ def train(argv=None):
 
     train_loader, val_loader, model = _get_loaders_and_model(args, logger=logger)
 
-    timer = Timer()
-    trainer = get_trainer(args, 'val_loss' if args.label == ['fcs'] else 'total_val_loss')
+    trainer = _get_trainer(args)
     trainer.fit(model, train_loader, val_loader)
-
-    total = timer.time_elapsed('train') + timer.time_elapsed('validate')
-    logger.info(f"Took {total}")
-    logger.info(f"  - training: {format_time_diff(timer.time_elapsed('train'))}")
-    logger.info(f"  - validation: {format_time_diff(timer.time_elapsed('validate'))}")
 
 def objective(args, trial):
     args.batch_size = trial.suggest_int('batch_size', 32, 256, log=True)
@@ -322,7 +314,7 @@ def objective(args, trial):
     args.experiment = f"trial_{trial.number:04d}"
 
     train_loader, val_loader, model = _get_loaders_and_model(args)
-    trainer = get_trainer(args, 'total_val_loss', trial=trial)
+    trainer = _get_trainer(args, trial=trial)
     trainer.fit(model, train_loader, val_loader)
 
     val_accuracy = trainer.callback_metrics.get("val_mean_accuracy", None)
@@ -364,21 +356,20 @@ def tune(argv=None):
 
 def predict(argv=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument('label', type=str, nargs='+', choices=['fcs', 'time', 'feed', 'starting_media', 'condition', 'sample'], help="the label to predict with")
+    parser.add_argument('label', type=str, nargs='+', choices=['time', 'feed', 'starting_media', 'condition', 'sample'], help="the label to predict with")
     parser.add_argument("--prediction", type=str, nargs='+', required=True, help="directories containing prediction data")
     parser.add_argument("-c", "--checkpoint", type=str, help="path to the model checkpoint file to use for inference")
-    parser.add_argument("--split-seed", type=parse_seed, help="seed for dataset splits", default=None)
     parser.add_argument("-o", "--output_npz", type=str, help="the path to save the embeddings to. Saved in NPZ format")
     parser.add_argument("-d", "--debug", action='store_true', help="run with a small dataset", default=False)
     parser.add_argument("-p", "--pred-only", action='store_true', default=False, help="only save predictions, otherwise save original image data and labels in output_npz")
-    parser.add_argument("-N", "--n_samples", type=int, help="number of samples to use from each class", default=None)
+    parser.add_argument("-n", "--n_samples", type=int, help="number of samples to use from each class", default=None)
     parser.add_argument("--return_embeddings", action='store_true', default=False, help="provide this if you don't want classifier, helpful in embeddings stuff")
     parser.add_argument("--save_residuals", action='store_true', default=False, help="provide this if you want to store the residual values")
 
     args = parser.parse_args(argv)
 
     logger = get_logger('info')
-    transform = _get_transforms('float', 'norm', 'center_crop', 'rgb')
+    transform = _get_transforms('float', 'norm', 'crop', 'rgb')
 
     predict_files = args.prediction
     n = args.n_samples

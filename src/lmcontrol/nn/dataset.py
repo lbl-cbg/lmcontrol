@@ -1,13 +1,13 @@
 import sys
-import warnings
 
 # function 'norm ' has been modified. Please keep a check of it.
 import numpy as np
+from lightly.data import LightlyDataset
 import torch
 from torch.utils.data import Dataset
 import torchvision.transforms.v2 as T
 from sklearn.model_selection import train_test_split
-from hdmf.common import get_hdf5io, EnumData
+from hdmf.common import get_hdf5io
 
 from ..data_utils import encode_labels, load_npzs
 from ..utils import get_logger
@@ -344,6 +344,32 @@ class SequentialTwoInputs(nn.Module):
             x1, x2 = transform(x1, x2)
         return x1, x2
 
+#    def __getitem__(self, idx):
+#        """Get a specific transformation or a slice of transformations.
+#
+#        Args:
+#            idx: Index or slice
+#
+#        Returns:
+#            Module or SequentialTwoInputs: The selected module(s)
+#        """
+#        if isinstance(idx, slice):
+#            return SequentialTwoInputs(*self.transforms[idx])
+#        else:
+#            return self.transforms[idx]
+#
+#    def __len__(self):
+#        """Return the number of transformations in the container."""
+#        return len(self.transforms)
+#
+#    def append(self, module):
+#        """Add a module to the end of the container.
+#
+#        Args:
+#            module: Module to add
+#        """
+#        self.transforms.append(module)
+#
 
 class LMDataset(Dataset):
     """
@@ -357,31 +383,17 @@ class LMDataset(Dataset):
 
     """
 
-    FC_COLS = [
-      'FSC-A', 'FSC-H', 'FSC-W',
-      'SSC-A', 'SSC-H', 'SSC-W',
-      'BL1-A', 'BL1-H', 'BL1-W',
-      'BL2-A', 'BL2-H', 'BL2-W',
-      'BL3-A', 'BL3-H', 'BL3-W',
-      'YL1-A', 'YL1-H', 'YL1-W',
-      'YL2-A', 'YL2-H', 'YL2-W',
-      'YL3-A', 'YL3-H', 'YL3-W',
-      'YL4-A', 'YL4-H', 'YL4-W'
-    ]
-
-
     __regression_labels = {'time'}
 
     split_vals = {'train': 0, 'validation': 1, 'test': 2}
 
     @classmethod
     def is_regression(cls, label):
-        return (label in cls.__regression_labels) or (label in cls.FC_COLS)
+        return label in cls.__regression_labels
 
     def __init__(self, path, label_classes=None, return_labels=False, logger=None, transform=None,
                  label=None, n_samples=None, split=None, rand_split=False, exp_split=False, split_seed=None):
         """
-
         Args:
             path (str)                  : path to the HDMF DynamicTable file
             label_classes (dict)        : a dictionary of classes for each label
@@ -399,7 +411,6 @@ class LMDataset(Dataset):
                                           exp_split is short for "experimental split"
 
         """
-        # When exp_split == False and rand_split == False, no there is not split.
         if rand_split and exp_split:
             raise ValueError("rand_split and exp_split cannot both be True")
 
@@ -409,30 +420,16 @@ class LMDataset(Dataset):
 
         self.return_labels = return_labels
 
-        if return_labels:
-            if not isinstance(label, (tuple, list)) or len(label) == 1:
-                label = label[0] if isinstance(label, (tuple, list)) else label
-                if label.lower() == 'fcs':
-                    label = self.FC_COLS
-                else:
-                    label = [label]
+        if not isinstance(label, (tuple, list)):
+            label = [label]
 
-        # The labels to return
         self.label = label
-
-        # Labels for each sample
         self.sample_labels = None
 
         self.transform = transform
 
-        # The split to use. Should be 'train', 'validation', or 'test'
         self.split = split
-
-        # The mask to use for selecting the samples that should be returned.
-        # Should take on the values fonud in self.split_vals
         self.split_mask = None
-
-        # The actual indices of the data subset to return
         self.subset = None
 
         self.io = None
@@ -445,11 +442,7 @@ class LMDataset(Dataset):
         self.rand_split = rand_split
 
         if exp_split:
-            # Use this function if you ever want to revisit campaign-based splitting
-            # train_mask, val_mask, test_mask = make_masks(self.table, split_validation=True, seed=split_seed)
-
-            # For now, lets just split based on ht
-            train_mask, val_mask, test_mask = make_ht_masks(self.table, seed=split_seed)
+            train_mask, val_mask, test_mask = make_masks(self.table, split_validation=True, seed=split_seed)
             split_mask = np.zeros(self.__len, dtype=int)
             split_mask[train_mask] = self.split_vals['train']
             split_mask[val_mask] = self.split_vals['validation']
@@ -463,14 +456,13 @@ class LMDataset(Dataset):
         # self.label_classes is set up so that we can specify label_classes or compute them on the fly.
         # We want to specify them after they have been computed to ensure the same label classes are
         # used across splits (e.g. training, validation, test sets)
+        self.label_classes = label_classes or dict()
 
     def open(self, worker_id=None):
         """Open file for reading if it is not currently open"""
         if self.table is None:
-            with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", message="EnumData is experimental.*", category=UserWarning)
-                self.io = get_hdf5io(self.path, 'r')
-                self.table = self.io.read()
+            self.io = get_hdf5io(self.path, 'r')
+            self.table = self.io.read()
 
 
             self.label_classes = dict()
@@ -479,21 +471,14 @@ class LMDataset(Dataset):
                 self.sample_labels = []
                 for k in self.label:
                     if isinstance(self.table[k], EnumData):
-                        self.label_classes[k] = self.table[k].elements.data[:]
+                        self.label_classes[k] = self.table[k].elements[:]
                     else:
                         self.label_classes[k] = None
-
-                    # Convert to 32-bit floating point to avoid issues with Torch
-                    # (By default, Torch assumes single precision floats)
-                    labels = self.table[k].data[:]
-                    if isinstance(labels[0], np.floating):
-                        labels = labels.astype(np.float32)
-                    self.sample_labels.append(labels)
+                    self.sample_labels.append(self.table[k].data)
 
     def close(self):
         self.io.close()
         self.table = None
-        self.sample_labels = None
         self.io = None
 
     def set_random_split(self, val_frac, test_frac, seed=None):
@@ -551,11 +536,7 @@ class LMDataset(Dataset):
         else:
             ret_tmp = [torch.as_tensor(self.sample_labels[j][i])
                        for j in range(len(self.sample_labels))]
-
-            # Keep this here, since it's for mulltlabel loss when we have different loss types
-            # return ret, tuple(ret_tmp)
-
-            return ret, torch.Tensor(ret_tmp)
+            return ret, tuple(ret_tmp)
 
     def __len__(self):
         return self.__len
@@ -622,31 +603,13 @@ def get_transforms(*transforms):
     return ret[0] if len(ret) == 1 else SequentialTwoInputs(*ret)
 
 
-def make_ht_masks(table, seed=None):
-    """
-    Split images into train, validation, test based on ht
-    """
-    ht = table['ht'].data[:]
-    uniq_ht = np.unique(ht)
 
-    np.random.default_rng(seed).shuffle(uniq_ht)
-
-    test_ht = uniq_ht[0]
-    val_ht = uniq_ht[1]
-
-    train_mask = np.ones(len(ht), dtype=bool)
-
-    test_mask = ht == test_ht
-    val_mask = ht == val_ht
-
-    train_mask[test_mask] = False
-    train_mask[val_mask] = False
-
-    assert (train_mask.sum() + val_mask.sum() + test_mask.sum()) == len(table)
-
-    return train_mask, val_mask, test_mask
-
-
+def get_lightly_dataset(npzs, transform=None, **lmdset_kwargs):
+    """Helper function for getting a LightlyDataset"""
+    dataset = LMDataset(npzs, **lmdset_kwargs)
+    return LightlyDataset.from_torch_dataset(dataset,
+                                             transform=transform,
+                                             index_to_filename=dataset.index_to_filename)
 
 
 def make_masks(table, split_validation=False, validation_split_ratio=0.5, seed=None):
@@ -665,26 +628,15 @@ def make_masks(table, split_validation=False, validation_split_ratio=0.5, seed=N
         rep_tuples: List of representative tuples (campaign, condition, ht) in validation
         rep_tuples2: List of representative tuples in second validation set (if split_validation=True)
     """
-    if 'source' in table:
-        val_sample = np.where(table['source'].elements.data[:] == 'sample')[0][0]
-        mask = table['source'].data[:] == val_sample
-    else:
-        mask = np.s_[:]
+    val_sample = np.where(table['source'].elements.data[:] == 'sample')[0][0]
+    mask = table['source'].data[:] == val_sample
 
-    if 'campaign' in table:
-        campaign = table['campaign'].data[:][mask]
-    else:
-        campaign = np.array(['fake_campaign'] * (len(table) if isinstance(mask, slice) else mask.sum()))
+    campaign = table['campaign'].data[:][mask]
+    condition = table['condition'].data[:][mask]
+    ht = table['ht'].data[:][mask]
 
     # Get unique campaigns and potentially split them
     unique_campaigns = np.sort(np.unique(campaign))
-    if split_validation and len(unique_campaigns) == 1:
-        msg = ("Cannot split based on campaigns, since there is only a single campaign present.\n"
-               "You must include a 'campaign' column with two or more campaigns to split based on experimental metadata")
-        raise ValueError(msg)
-
-    condition = table['condition'].data[:][mask]
-    ht = table['ht'].data[:][mask]
 
     if split_validation:
         # Randomly shuffle campaigns for splitting
