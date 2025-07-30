@@ -22,10 +22,13 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
-from lightning.pytorch.callbacks import Timer
+from lightning.pytorch.callbacks import ModelSummary, Timer
 from torchvision.models.resnet import BasicBlock, Bottleneck
 
-from ..utils import get_logger, parse_seed, format_time_diff
+from hdmf_ai.results_table import ResultsTable, RegressionOutput
+from hdmf.common import get_hdf5io
+
+from ..utils import get_logger, parse_seed, format_time_diff, get_metadata_info
 from ..data_utils import load_npzs, encode_labels
 from .dataset import LMDataset, get_transforms as _get_transforms
 from .resnet import ResNet, add_args as add_resnet_args
@@ -78,7 +81,7 @@ class LightningResNet(L.LightningModule):
 
 
     def __init__(self, label_classes, lr=0.01, step_size=2, gamma=0.1, planes=[8, 16, 32, 64],
-                 layers=[1, 1, 1, 1], block=BasicBlock, return_embeddings=False, time_weight=1e-3):
+                 layers=[1, 1, 1, 1], block=BasicBlock, include_features=False, features_only=False, time_weight=1e-3):
         super().__init__()
 
         self.label_classes = label_classes
@@ -109,7 +112,7 @@ class LightningResNet(L.LightningModule):
                     self.activations.append(nn.Softmax(dim=1))
 
         self.backbone = ResNet(block=block, layers=layers, planes=planes, num_outputs=self.num_outputs,
-                               return_embeddings=return_embeddings)
+                               include_features=include_features, features_only=features_only)
 
         self.lr = lr
         self.step_size = step_size
@@ -117,7 +120,7 @@ class LightningResNet(L.LightningModule):
         self.block = block
         self.planes = planes
         self.layers = layers
-        self.return_embeddings = return_embeddings
+        self.features_only = features_only
         self.save_hyperparameters()
 
     def forward(self, x):
@@ -178,9 +181,9 @@ class LightningResNet(L.LightningModule):
             loss_components = self.criterion(outputs, labels)
             self._score("train", outputs, loss_components, labels)
             total_loss = sum(loss_components)
-            self.log('total_train_loss', total_loss, on_step=False, on_epoch=True)
+            self.log('total_train_loss', total_loss)
         else:
-            self.log('train_loss', total_loss, on_step=False, on_epoch=True)
+            self.log('train_loss', total_loss)
 
 
         return total_loss
@@ -197,9 +200,9 @@ class LightningResNet(L.LightningModule):
             loss_components = self.criterion(outputs, labels)
             self._score("val", outputs, loss_components, labels)
             total_loss = sum(loss_components)
-            self.log('total_val_loss', total_loss, on_step=False, on_epoch=True)
+            self.log('total_val_loss', total_loss, on_step=False, on_epoch=True, sync_dist=True)
         else:
-            self.log('val_loss', total_loss, on_step=False, on_epoch=True)
+            self.log('val_loss', total_loss, on_step=False, on_epoch=True, sync_dist=True)
 
         return total_loss
 
@@ -243,11 +246,8 @@ def _add_training_args(parser):
     parser.add_argument("--exp-split", action='store_true', default=False, help="split samples using experimental conditions, otherwise randomly")
 
     parser.add_argument("-c","--checkpoint", type=str, help="path to the model checkpoint file to use for inference")
-    parser.add_argument("-q", "--quick", action='store_true', help="run with a small dataset", default=False)
     parser.add_argument("-e", "--epochs", type=int, help="the number of epochs to run for", default=10)
-    parser.add_argument("-d", "--debug", action='store_true', help="run with a small dataset", default=False)
     parser.add_argument("-o", "--outdir", type=str, help="the directory to save output to", default='.')
-    parser.add_argument("-N", "--n_samples", type=int, help="number of samples to use from each NPZ", default=None)
     parser.add_argument("--early_stopping", action='store_true', help="enable early stopping", default=False)
     parser.add_argument("--wandb", action='store_false', default=False, help="provide this flag to stop wandb")
     parser.add_argument("--lr", type=float, help="learning rate", default=0.001)
@@ -258,21 +258,24 @@ def _add_training_args(parser):
     parser.add_argument("-g", "--devices", type=int, help="number of devices for trainer", default=1)
     parser.add_argument("-n", "--num_nodes", type=int, help="number of nodes for trainer", default=1)
 
+    parser.add_argument("-q", "--quick", action='store_true', help="run with a small dataset", default=False)
+    parser.add_argument("-d", "--debug", action='store_true', help="dismantled parallel data loading", default=False)
+
     add_resnet_args(parser)
 
     parser.add_argument("--return_embeddings", action='store_true', default=False, help="return ResNet features, rather than final output")
 
 
 def _get_loaders_and_model(args,  logger=None):
-    train_transform = _get_transforms('float', 'norm','blur','rotate', 'random_crop','hflip', 'vflip', 'noise', 'rgb')
-    val_transform = _get_transforms('float', 'norm','blur','rotate', 'random_crop','hflip', 'vflip', 'noise', 'rgb')
+    train_transform = _get_transforms('float', 'norm', 'blur','rotate', 'random_crop','hflip', 'vflip', 'noise', 'rgb')
+    val_transform = _get_transforms('float', 'norm', 'center_crop', 'rgb')
+    # val_transform = _get_transforms('float', 'norm','blur','rotate', 'random_crop','hflip', 'vflip', 'noise', 'rgb')
 
     train_loader, val_loader = get_loaders(args,
                                            inference=False,
                                            train_tfm=train_transform,
                                            val_tfm=val_transform,
-                                           return_labels=True,
-                                           exp_split=args.exp_split)
+                                           return_labels=True)
 
 
     model = LightningResNet(train_loader.dataset.label_classes, lr=args.lr, step_size=args.step_size, gamma=args.gamma,
@@ -294,7 +297,8 @@ def train(argv=None):
     train_loader, val_loader, model = _get_loaders_and_model(args, logger=logger)
 
     timer = Timer()
-    trainer = get_trainer(args, 'val_loss' if args.label == ['fcs'] else 'total_val_loss')
+    mod_sum = ModelSummary(max_depth=3)
+    trainer = get_trainer(args, 'val_loss' if args.label == ['fcs'] else 'total_val_loss', extra_callbacks=[timer, mod_sum])
     trainer.fit(model, train_loader, val_loader)
 
     total = timer.time_elapsed('train') + timer.time_elapsed('validate')
@@ -364,114 +368,87 @@ def tune(argv=None):
 
 def predict(argv=None):
     parser = argparse.ArgumentParser()
+    parser.add_argument("checkpoint", type=str, help="path to the model checkpoint file to use for inference")
+    parser.add_argument("input", type=str, help="HDMF input file")
+    parser.add_argument("output", type=str, help="the path to save HDMF-AI table to")
     parser.add_argument('label', type=str, nargs='+', choices=['fcs', 'time', 'feed', 'starting_media', 'condition', 'sample'], help="the label to predict with")
-    parser.add_argument("--prediction", type=str, nargs='+', required=True, help="directories containing prediction data")
     parser.add_argument("-c", "--checkpoint", type=str, help="path to the model checkpoint file to use for inference")
     parser.add_argument("--split-seed", type=parse_seed, help="seed for dataset splits", default=None)
-    parser.add_argument("-o", "--output_npz", type=str, help="the path to save the embeddings to. Saved in NPZ format")
-    parser.add_argument("-d", "--debug", action='store_true', help="run with a small dataset", default=False)
-    parser.add_argument("-p", "--pred-only", action='store_true', default=False, help="only save predictions, otherwise save original image data and labels in output_npz")
-    parser.add_argument("-N", "--n_samples", type=int, help="number of samples to use from each class", default=None)
-    parser.add_argument("--return_embeddings", action='store_true', default=False, help="provide this if you don't want classifier, helpful in embeddings stuff")
+    parser.add_argument("--exp-split", action='store_true', default=False, help="split samples using experimental conditions, otherwise randomly")
+
+    parser.add_argument("-b", "--batch_size", type=int, help="batch size for training and validation", default=32)
+
     parser.add_argument("--save_residuals", action='store_true', default=False, help="provide this if you want to store the residual values")
+    parser.add_argument("-V", "--add-viz", action='store_true', help="Compute UMAP embedding for visualiztion", default=False)
+    parser.add_argument("-2", "--two-dim", action='store_true', help="Compute 2D UMAP embedding (default is 3D embedding)", default=False)
+
+    parser.add_argument("-q", "--quick", action='store_true', help="run with a small dataset", default=False)
+    parser.add_argument("-d", "--debug", action='store_true', help="dismantled parallel data loading", default=False)
 
     args = parser.parse_args(argv)
 
     logger = get_logger('info')
     transform = _get_transforms('float', 'norm', 'center_crop', 'rgb')
 
-    predict_files = args.prediction
-    n = args.n_samples
+    metadata_info = get_metadata_info()
+    logger.info(f"Loading prediction data: {len(args.input)} files")
 
+    loader = get_loaders(args,
+                         inference=True,
+                         tfm=transform,
+                         return_labels=True,
+                         logger=logger)
 
-    logger.info(f"Loading prediction data: {len(predict_files)} files")
-    predict_dataset = LMDataset(predict_files, transform=transform, logger=logger, return_labels=True, label=args.label, n_samples=n)
+    dataset = loader.dataset
 
-    model = LightningResNet.load_from_checkpoint(args.checkpoint, label_classes=predict_dataset.label_classes, return_embeddings=args.return_embeddings)
+    model = LightningResNet.load_from_checkpoint(args.checkpoint, label_classes=dataset.label_classes,
+                                                 include_features=True, features_only=False)
 
-    for i in range(len(predict_dataset.sample_labels)):
-        current_labels = predict_dataset.sample_labels[i]
-        logger.info(predict_dataset.label[i] + " - " + str(torch.unique(current_labels)))
-
-
-    predict_loader = DataLoader(predict_dataset, batch_size=32, shuffle=False, drop_last=False, num_workers=3)
-
-    accelerator = "gpu" if torch.cuda.is_available() else "cpu"
-    trainer = L.Trainer(devices=1, accelerator=accelerator)
+    targs = {
+        "accelerator": "gpu" if torch.cuda.is_available() else "cpu",
+        "limit_predict_batches": 100 if args.quick else None,
+        "devices": 1
+    }
+    trainer = L.Trainer(**targs)
 
     logger.info("Running predictions")
 
+    predictions = trainer.predict(model, loader)
+    features, predictions = [torch.cat(x).numpy() for x in zip(*predictions)]
 
-    if not args.return_embeddings:
-        predictions = [torch.cat(l).numpy() for l in zip(*trainer.predict(model, predict_loader))]
-        true_labels = predict_dataset.sample_labels
-        label_classes = model.label_classes
-        out_data = dict()
+    logger.info(f"Results saved to {args.output}")
 
-        for pred, true, key in zip(predictions, true_labels, label_classes):
-            true = true.numpy()
+    t = ResultsTable("resnet_supervised",
+                     description="Results from supervised training a ResNet",
+                     n_samples=len(dataset))
 
-            out_data[key] = {
-                'output': pred,
-                'labels': true,
-            }
+    if dataset.split_mask is not None:
+        t.add_tvt_split(dataset.split_mask.numpy()[:len(features)],
+                        description=f"Generated with torch.randperm, with seed {args.split_seed}")
 
-            if LMDataset.is_regression(key):
+    t.add_embedding(features, description="ResNet features")
+    for i, c in enumerate(dataset.FC_COLS):
+        t.add_column(c, description=metadata_info[c]['description'], data=predictions[:, i], col_cls=RegressionOutput)
 
-                mse = mean_squared_error(true, pred)
-                mae = mean_absolute_error(true, pred)
-                r2 = r2_score(true, pred)
+    if dataset.table is None:
+        dataset.open()
 
-                logger.info(f"Mode: Regression for {key}")
-                logger.info(f"Mean Squared Error: {mse:.4f}")
-                logger.info(f"Mean Absolute Error: {mae:.4f}")
-                logger.info(f"R² Score: {r2:.4f}")
+    if args.add_viz:
+        if targs['accelerator'] == "gpu":
+            from cuml import UMAP
+        else:
+            from umap import UMAP
+        D = 2 if args.two_dim else 3
+        umap = UMAP(n_components=D,
+                    min_dist=0.1, metric='euclidean')
+        logger.info(f"Calculating {D}D embedding for visualization")
+        emb = umap.fit_transform(features)
+        t.add_viz_embedding(emb,
+                            description=f"UMAP embedding computed using {str(umap.get_params())}")
 
-                if args.save_residuals:
-                    logger.info("Calculating and saving residuals")
-                    residuals = true - pred
-                    out_data[key]['residuals'] = residuals
+    with get_hdf5io(args.output, mode='w') as io:
+        io.write(t)
 
-            else:
-                logger.info(f"Mode: Classification for {key}")
-
-                pred_labels = np.argmax(pred, axis=1)
-
-                accuracy = accuracy_score(true, pred_labels)
-                precision = precision_score(true, pred_labels, average='weighted')
-                recall = recall_score(true, pred_labels, average='weighted')
-                conf_matrix = confusion_matrix(true, pred_labels)
-
-                logger.info(f"Accuracy: {accuracy:.4f}")
-                logger.info(f"Precision: {precision:.4f}")
-                logger.info(f"Recall: {recall:.4f}")
-                logger.info(f"Confusion Matrix:\n{conf_matrix}")
-                out_data[key]['pred'] = pred_labels
-                out_data[key]['classes'] = label_classes[key]
-
-    else:
-        predictions = trainer.predict(model, predict_loader)
-        label_classes = model.label_classes
-        out_data = dict()
-        true_labels = predict_dataset.sample_labels
-
-        for key in label_classes:
-
-            predictions = np.concatenate(predictions, axis=0)
-            out_data[key] = {
-                'output': predictions,
-                'labels': true_labels
-            }
-
-
-    if not args.pred_only:
-        dset = predict_dataset
-        out_data['images'] = np.asarray(torch.squeeze(dset.data))
-        out_data['metadata'] = {key: np.asarray(dset.metadata[key]) for key in dset.metadata}
-
-    np.savez(args.output_npz, **out_data)
-
-    logger.info(f"Results saved to {args.output_npz}")
 
 
 if __name__ == '__main__':

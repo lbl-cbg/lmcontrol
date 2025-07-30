@@ -261,7 +261,6 @@ def predict(argv=None):
     logger = get_logger('info')
     transform = _get_transforms('float', 'norm', 'center_crop', 'rgb')
 
-
     loader = get_loaders(args,
                          inference=True,
                          tfm=transform,
@@ -269,7 +268,6 @@ def predict(argv=None):
                          logger=logger)
 
     dataset = loader.dataset
-
 
     model = BYOL.load_from_checkpoint(args.checkpoint)
 

@@ -1,3 +1,5 @@
+import warnings
+
 from functools import partial
 from typing import Any, Callable, List, Optional, Type, Union
 
@@ -21,7 +23,8 @@ class ResNet(nn.Module):
         width_per_group: int = 64,
         replace_stride_with_dilation: Optional[List[bool]] = None,
         norm_layer: Optional[Callable[..., nn.Module]] = None,
-        return_embeddings: bool = False
+        features_only: bool = False,
+        include_features: bool = False
     ) -> None:
         super().__init__()
         _log_api_usage_once(self)
@@ -46,7 +49,11 @@ class ResNet(nn.Module):
         self.bn1 = norm_layer(self.inplanes)
         self.relu = nn.ReLU(inplace=True)
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-        self.return_embeddings = return_embeddings
+        self.features_only = features_only
+        self.include_features = include_features
+
+        if self.features_only and self.include_features:
+            warnings.warn("features_only and include_features both set to True. Ignoring features_only")
 
         if planes is None:
             planes = [64, 128, 256, 512]
@@ -146,8 +153,11 @@ class ResNet(nn.Module):
 
         x = self.avgpool(x)
         x = torch.flatten(x, 1)
-        if not self.return_embeddings:
-            x = self.fc(x)
+        if self.include_features:
+            x = (x, self.fc(x))
+        else:
+            if not self.features_only:
+                x = self.fc(x)
         return x
 
     def forward(self, x: Tensor) -> Tensor:
@@ -171,11 +181,12 @@ def get_planes(plane_cmd):
 def get_layers(layers_cmd):
     """This is actually the number of resnet blocks to use, where we fix the size of each resnet block to be 1 layer."""
     l = int(layers_cmd)
-    layers = [1 if i < l else 0 for i in range(4)]
+    #layers = [1 if i < l else 0 for i in range(4)]
+    layers = [2 if i < l else 0 for i in range(4)]
     return layers
 
 
 def add_args(parser):
     parser.add_argument("--block", type=get_block, choices=['BasicBlock', 'Bottleneck'], help="type of block to use in the model", default='Bottleneck')
-    parser.add_argument("--planes", type=get_planes, choices=['3', '4'], help="list of number of planes for each layer", default='4')
+    parser.add_argument("--planes", type=get_planes, choices=['3', '4', '5', '6'], help="list of number of planes for each layer", default='4')
     parser.add_argument("--layers", type=get_layers, choices=['1', '2', '3', '4'], help="list of number of layers in each stage", default='4')
