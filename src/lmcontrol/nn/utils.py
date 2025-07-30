@@ -6,7 +6,7 @@ from torch.utils.data import DataLoader
 
 import lightning as L
 from lightning.pytorch.loggers import WandbLogger, CSVLogger
-from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint, LearningRateMonitor
+from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint, LearningRateMonitor, ModelSummary
 from optuna.integration import PyTorchLightningPruningCallback
 from lightning.pytorch.strategies import DDPStrategy
 
@@ -16,14 +16,13 @@ from .dataset import LMDataset
 from ..utils import get_logger
 
 
-def get_loaders(args, inference=True, tfm=None, train_tfm=None, val_tfm=None, return_labels=True, logger=None, exp_split=False):
+def get_loaders(args, inference=True, tfm=None, train_tfm=None, val_tfm=None, return_labels=True, logger=None):
     logger = logger or get_logger('warning')
 
-    dset_kwargs = dict(n_samples=args.n_samples,
-                       logger=logger,
+    dset_kwargs = dict(logger=logger,
                        return_labels=return_labels,
-                       exp_split=exp_split,
-                       rand_split=not exp_split,
+                       exp_split=args.exp_split,
+                       rand_split=not args.exp_split,
                        split_seed=args.split_seed)
 
     for attr in ('label', ):
@@ -129,7 +128,9 @@ def get_trainer(args, monitor, mode='min', trial=None, extra_callbacks=None):
         targs['limit_train_batches'] = 100
         targs['limit_val_batches'] = 10
 
+    for cb in callbacks:
+        if isinstance(cb, ModelSummary):
+            targs['enable_model_summary'] = True
+            break
+
     return L.Trainer(**targs)
-
-
-

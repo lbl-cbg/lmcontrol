@@ -379,7 +379,7 @@ class LMDataset(Dataset):
         return (label in cls.__regression_labels) or (label in cls.FC_COLS)
 
     def __init__(self, path, label_classes=None, return_labels=False, logger=None, transform=None,
-                 label=None, n_samples=None, split=None, rand_split=False, exp_split=False, split_seed=None):
+                 label=None, split=None, rand_split=False, exp_split=False, split_seed=None):
         """
 
         Args:
@@ -390,7 +390,6 @@ class LMDataset(Dataset):
             logger (Logger)             : the logger to use when loading data
             transform (Transform)       : the transform to apply to each image
             label (str, list, tuple)    : the label(s) to return when getting a sample
-            n_samples (int)             : the number of samples to load from each file
             split (str)                 : a string indication which split to use ("train" or "val")
             exp_split (bool)            : calculate train-validation-test split using metdata on campaign, condition,
                                           and ht (a.k.a. replicate). validation and test split are first calculated
