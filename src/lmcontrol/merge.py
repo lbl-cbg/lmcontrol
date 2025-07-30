@@ -10,6 +10,18 @@ import numpy as np
 from sklearn.preprocessing import LabelEncoder
 
 
+_scale_map = dict()
+
+def scaler(key):
+    global _scale_map
+    def func(f):
+        _scale_map[key] = f
+        return f
+    return func
+
+def get_scaler(key):
+    return _scale_map[key]
+
 def ls_metadata(argv=None):
     """
     Prints the keys and values inside multiple NPZ files.
@@ -39,6 +51,35 @@ def ls_metadata(argv=None):
                         print(f"{key:<16}: shape={value.shape}, dtype={value.dtype}")
         except Exception as e:
             print(f"An error occurred while processing {file_path}: {e}")
+
+
+@scaler("auto-arcsinh")
+def suggest_arcsinh_cofactor(data):
+    """
+    Suggest arcsinh cofactor 'a' based on data distribution.
+
+    Parameters:
+    - data: 1D numpy array or Pandas Series of positive values (can include zeros and negatives)
+
+    Returns:
+    - suggested_cofactor: float, suggested cofactor based on heuristic
+    """
+    # Filter out negatives for statistics (arcsinh handles negatives, but cofactor depends on positive scale)
+    positive_data = data[data > 0]
+
+    if len(positive_data) == 0:
+        raise ValueError("No positive values in data to base cofactor suggestion on.")
+
+    median_val = np.median(positive_data)
+    #p90_val = np.percentile(positive_data, 90)
+
+    # Heuristic: cofactor ~ 1 / median or 1 / p90 (choose which feels better)
+    suggested_cofactor = 1.0 / median_val
+
+
+    scaled = np.arcsinh(data * suggested_cofactor)
+
+    return scaled
 
 
 def main(argv=None):
@@ -90,6 +131,10 @@ def main(argv=None):
             value = enc.transform(value).astype(np.uint64)
             table.add_column(key, metadata_info[key]['description'], data=value, enum=enc.classes_)
         else:
+            if 'scale' not in metadata_info[key]:
+                breakpoint()
+            if metadata_info[key]['scale'] is not None:
+                value = get_scaler(metadata_info[key]['scale'])(value)
             table.add_column(key, metadata_info[key]['description'], data=value.astype(float))
 
     if len(missing_desc) > 0:
