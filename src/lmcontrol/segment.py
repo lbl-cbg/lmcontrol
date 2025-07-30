@@ -349,6 +349,24 @@ def dir_iterator(image_dir, logger, downsample=None, rng=None):
         yield tif, image
 
 
+def read_zip_tiff(zip_ref, tiff_path):
+    close_zip = False
+    if isinstance(zip_ref, str):
+        close_zip = True
+        zip_ref = ZipFile(zip_ref, 'r')
+    with zip_ref.open(tiff_path) as tiff_file:
+        # Read the TIFF file into memory
+        img_data = tiff_file.read()
+        img = Image.open(io.BytesIO(img_data))
+        # Force loading the image data since we're reading from a stream
+        img.load()
+        # Convert to NumPy array
+        ret = np.array(img)
+    if close_zip:
+        zip_ref.close()
+    return ret
+
+
 def zip_iterator(zip_path, paths, logger, downsample=None, rng=None):
     if downsample is not None:
         indices = get_indices(downsample, len(paths), rng)
@@ -357,17 +375,10 @@ def zip_iterator(zip_path, paths, logger, downsample=None, rng=None):
     logger.info(f"Loading {len(paths)} images from {zip_path}")
     with ZipFile(zip_path, 'r') as zip_ref:
         for tiff_path in tqdm(paths):
-            with zip_ref.open(tiff_path) as tiff_file:
-                # Read the TIFF file into memory
-                img_data = tiff_file.read()
-                img = Image.open(io.BytesIO(img_data))
-                # Force loading the image data since we're reading from a stream
-                img.load()
-                # Convert to NumPy array
-                array = np.array(img)
-                if array.ndim == 3:
-                    array = array[:, :, 0]
-                yield tiff_path, array
+            array = read_zip_tiff(zip_ref, tiff_path)
+            if array.ndim == 3:
+                array = array[:, :, 0]
+            yield tiff_path, array
 
 
 def build_metadata(campaign, ht_metadata, sample_metadata, **defaults):
@@ -466,10 +477,14 @@ def segment_all(
     npz_out = os.path.join(output_dir, "all_processed.npz")
     logger.info(f"Cropping images to {crop} and saving to {npz_out} for convenience")
 
+
+    images_dtype = np.dtype('uint8')
+
     shapes = set()
     n_total_imgs = 0
     events = list()
     for image_path, image in images:
+        images_dtype = image.dtype if image.dtype.itemsize > images_dtype.itemsize else images_dtype
         n_total_imgs += 1
         try:
             shapes.add(image.shape)
@@ -519,7 +534,7 @@ def segment_all(
         seg_images = pad_images_to_max_size(seg_images)
         seg_masks = pad_images_to_max_size(seg_masks, padval=0)
 
-    seg_images = np.array(seg_images, dtype=np.uint8)
+    seg_images = np.array(seg_images, dtype=images_dtype)
     seg_masks = np.array(seg_masks, dtype=np.uint8)
     paths = np.array(paths)
 
@@ -606,7 +621,7 @@ def parse_acs_zip(zip_path):
                     fcs_path.append(path)
             if len(fcs_path) == 1:
                 with zip_file.open(fcs_path[0]) as fcs_fh:
-                    fcs_sample_df = fk.Sample(io.BytesIO(fcs_fh.read())).as_dataframe(source='raw')
+                    fcs_sample_df = fk.Sample(io.BytesIO(fcs_fh.read()))
             else:
                 raise ValueError(f"Found more than one .fcs file in {zip_path}")
         return fcs_sample_df, tif_paths
@@ -710,7 +725,8 @@ def main(argv=None):
                     crop=args.crop, pad=args.pad, include_unseg=args.include_unseg,
                     save_unseg=args.save_unseg, save_tifs=args.save_tifs, fcs_sample_df=fcs_sample_df)
     else:
-        fcs_sample_df, tif_paths = parse_acs_zip(args.images)
+        fcs_sample, tif_paths = parse_acs_zip(args.images)
+        fcs_sample_df = fcs_sample.as_dataframe(source='raw')
 
         if fcs_sample_df is not None:
             it = zip_iterator(args.images, tif_paths, logger, downsample=args.downsample, rng=rng)
