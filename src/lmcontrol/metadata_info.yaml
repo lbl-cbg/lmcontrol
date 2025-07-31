@@ -1,160 +1,120 @@
 time:
   description: the age of the sample from which the image was taken
   enum: false
-  scale: null
 sample:
   description: the ID of the sample from which the image was taken
   enum: true
-  scale: null
 ht:
   description: the bioreactor that the sample from which the image was taken
   enum: true
-  scale: null
 condition:
   description: the experimental condition of the bioreactor
   enum: true
-  scale: null
 feed:
   description: the feed used in the bioreactor
   enum: true
-  scale: null
 starting_media:
   description: the starting media of the bioreactor
   enum: true
-  scale: null
 campaign:
   description: the campaign (a.k.a. experiment) of the bioreactor
   enum: true
-  scale: null
 manual_scaling:
   description: whether or not scaling was done manually
   enum: false
-  scale: null
 scale_max:
   description: the max value when scaling images. This is a property set on the Flow cytometer data processing system
   enum: false
-  scale: null
 scale_min:
   description: the min value when scaling images. This is a property set on the Flow cytometer data processing system
   enum: false
-  scale: null
 source:
   description: the source of this sampl--water, background, or sample--where sample indicates a sample from the bioreactor
   enum: true
-  scale: null
 FSC-A:
   description: "Forward Scatter Area - integrated signal indicating cell size"
   enum: false
-  scale: "auto-arcsinh"
 SSC-A:
   description: "Side Scatter Area - integrated signal indicating cell granularity and internal complexity"
   enum: false
-  scale: "auto-arcsinh"
 BL1-A:
   description: "Blue Laser Channel 1 Area - integrated fluorescence signal from first blue laser emission filter (typically 488nm excitation)"
   enum: false
-  scale: "auto-arcsinh"
 BL2-A:
   description: "Blue Laser Channel 2 Area - integrated fluorescence signal from second blue laser emission filter (typically 488nm excitation)"
   enum: false
-  scale: "auto-arcsinh"
 BL3-A:
   description: "Blue Laser Channel 3 Area - integrated fluorescence signal from third blue laser emission filter (typically 488nm excitation)"
   enum: false
-  scale: "auto-arcsinh"
 YL4-A:
   description: "Yellow Laser Channel 4 Area - integrated fluorescence signal from fourth yellow laser emission filter (typically 561nm excitation)"
   enum: false
-  scale: "auto-arcsinh"
 YL3-A:
   description: "Yellow Laser Channel 3 Area - integrated fluorescence signal from third yellow laser emission filter (typically 561nm excitation)"
   enum: false
-  scale: "auto-arcsinh"
 YL2-A:
   description: "Yellow Laser Channel 2 Area - integrated fluorescence signal from second yellow laser emission filter (typically 561nm excitation)"
   enum: false
-  scale: "auto-arcsinh"
 YL1-A:
   description: "Yellow Laser Channel 1 Area - integrated fluorescence signal from first yellow laser emission filter (typically 561nm excitation)"
   enum: false
-  scale: "auto-arcsinh"
 FSC-H:
   description: "Forward Scatter Height - maximum signal intensity indicating cell size"
   enum: false
-  scale: "auto-arcsinh"
 SSC-H:
   description: "Side Scatter Height - maximum signal intensity indicating cell granularity and internal complexity"
   enum: false
-  scale: "auto-arcsinh"
 BL1-H:
   description: "Blue Laser Channel 1 Height - maximum fluorescence signal intensity from first blue laser emission filter"
   enum: false
-  scale: "auto-arcsinh"
 BL2-H:
   description: "Blue Laser Channel 2 Height - maximum fluorescence signal intensity from second blue laser emission filter"
   enum: false
-  scale: "auto-arcsinh"
 BL3-H:
   description: "Blue Laser Channel 3 Height - maximum fluorescence signal intensity from third blue laser emission filter"
   enum: false
-  scale: "auto-arcsinh"
 YL4-H:
   description: "Yellow Laser Channel 4 Height - maximum fluorescence signal intensity from fourth yellow laser emission filter"
   enum: false
-  scale: "auto-arcsinh"
 YL3-H:
   description: "Yellow Laser Channel 3 Height - maximum fluorescence signal intensity from third yellow laser emission filter"
   enum: false
-  scale: "auto-arcsinh"
 YL2-H:
   description: "Yellow Laser Channel 2 Height - maximum fluorescence signal intensity from second yellow laser emission filter"
   enum: false
-  scale: "auto-arcsinh"
 YL1-H:
   description: "Yellow Laser Channel 1 Height - maximum fluorescence signal intensity from first yellow laser emission filter"
   enum: false
-  scale: "auto-arcsinh"
 FSC-W:
   description: "Forward Scatter Width - time duration of signal pulse, used for doublet discrimination and cell size assessment"
   enum: false
-  scale: "auto-arcsinh"
 SSC-W:
   description: "Side Scatter Width - time duration of signal pulse, used for doublet discrimination"
   enum: false
-  scale: "auto-arcsinh"
 BL1-W:
   description: "Blue Laser Channel 1 Width - time duration of fluorescence signal pulse from first blue laser emission filter"
   enum: false
-  scale: "auto-arcsinh"
 BL2-W:
   description: "Blue Laser Channel 2 Width - time duration of fluorescence signal pulse from second blue laser emission filter"
   enum: false
-  scale: "auto-arcsinh"
 BL3-W:
   description: "Blue Laser Channel 3 Width - time duration of fluorescence signal pulse from third blue laser emission filter"
   enum: false
-  scale: "auto-arcsinh"
 YL4-W:
   description: "Yellow Laser Channel 4 Width - time duration of fluorescence signal pulse from fourth yellow laser emission filter"
   enum: false
-  scale: "auto-arcsinh"
 YL3-W:
   description: "Yellow Laser Channel 3 Width - time duration of fluorescence signal pulse from third yellow laser emission filter"
   enum: false
-  scale: "auto-arcsinh"
 YL2-W:
   description: "Yellow Laser Channel 2 Width - time duration of fluorescence signal pulse from second yellow laser emission filter"
   enum: false
-  scale: "auto-arcsinh"
 YL1-W:
   description: "Yellow Laser Channel 1 Width - time duration of fluorescence signal pulse from first yellow laser emission filter"
   enum: false
-  scale: "auto-arcsinh"
 Time:
   description: "The time of flow cytometer event"
   enum: false
-  scale: null
 Event:
   description: "The flow cytometer event number"
   enum: false
-  scale: null
