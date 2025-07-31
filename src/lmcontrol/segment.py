@@ -607,11 +607,17 @@ def list_zip_files(zip_file_path):
     return files_only
 
 
+def read_sample(f):
+    fcs_sample = fk.Sample(f)
+    fcs_sample.apply_transform(fk.transforms.AsinhTransform(param_t=262144, param_m=4.0, param_a=0.0))
+    return fcs_sample
+
+
 def parse_acs_zip(zip_path):
     """Look for an FCS file and TIFF files in a file assumed to be an ACS Zip archive"""
     try:
         tif_paths = list()
-        fcs_sample_df = None
+        fcs_sample = None
         with ZipFile(zip_path, 'r') as zip_file:
             fcs_path = list()
             for path in list_zip_files(zip_path):
@@ -621,18 +627,12 @@ def parse_acs_zip(zip_path):
                     fcs_path.append(path)
             if len(fcs_path) == 1:
                 with zip_file.open(fcs_path[0]) as fcs_fh:
-                    fcs_sample_df = fk.Sample(io.BytesIO(fcs_fh.read()))
+                    fcs_sample = read_sample(io.BytesIO(fcs_fh.read()))
             else:
                 raise ValueError(f"Found more than one .fcs file in {zip_path}")
-        return fcs_sample_df, tif_paths
+        return fcs_sample, tif_paths
     except BadZipFile:
         return None
-
-
-def check_fcs(fcs_path):
-    if fcs_path is None:
-        return None
-    return fk.Sample(fcs_path).as_dataframe(source='raw').iloc[events]
 
 
 def main(argv=None):
@@ -718,7 +718,7 @@ def main(argv=None):
 
         fcs_sample_df = None
         if args.fcs is not None:
-            fcs_sample_df = check_fcs(args.fcs)
+            fcs_sample_df = read_sample(args.fcs)
 
         it = dir_iterator(args.images, logger, downsample=args.downsample, rng=rng)
         segment_all(it, args.output_dir, metadata, logger,
@@ -726,7 +726,7 @@ def main(argv=None):
                     save_unseg=args.save_unseg, save_tifs=args.save_tifs, fcs_sample_df=fcs_sample_df)
     else:
         fcs_sample, tif_paths = parse_acs_zip(args.images)
-        fcs_sample_df = fcs_sample.as_dataframe(source='raw')
+        fcs_sample_df = fcs_sample.as_dataframe(source='xform')
 
         if fcs_sample_df is not None:
             it = zip_iterator(args.images, tif_paths, logger, downsample=args.downsample, rng=rng)
