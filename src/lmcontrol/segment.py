@@ -609,7 +609,7 @@ def list_zip_files(zip_file_path):
 
 def read_sample(f):
     fcs_sample = fk.Sample(f)
-    fcs_sample.apply_transform(fk.transforms.AsinhTransform(param_t=262144, param_m=4.0, param_a=0.0))
+    fcs_sample.apply_transform(fk.transforms.AsinhTransform(param_t=1048576, param_m=4.0, param_a=0.0))
     return fcs_sample
 
 
