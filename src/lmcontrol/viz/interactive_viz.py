@@ -19,7 +19,7 @@ import plotly.colors as pc
 import plotly.graph_objects as go
 import plotly.express as px
 
-from matplotlib.colors import Normalize, LinearSegmentedColormap
+from matplotlib.colors import SymLogNorm, Normalize, LinearSegmentedColormap
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 
@@ -30,11 +30,19 @@ metadata_info = None
 
 # Helper functions
 def np_image_to_base64(im_matrix):
-    im = Image.fromarray(im_matrix)
+    # Normalize 16-bit data to 8-bit range for display
+    if im_matrix.dtype == np.uint16:
+        # Normalize to 0-255 range
+        im_normalized = ((im_matrix - im_matrix.min()) /
+                        (im_matrix.max() - im_matrix.min()) * 255).astype(np.uint8)
+    else:
+        im_normalized = im_matrix
+
+    im = Image.fromarray(im_normalized)
     buffer = io.BytesIO()
-    im.save(buffer, format="jpeg")
+    im.save(buffer, format="JPEG")
     encoded_image = base64.b64encode(buffer.getvalue()).decode()
-    im_url = "data:image/jpeg;base64, " + encoded_image
+    im_url = "data:image/jpeg;base64," + encoded_image
     return im_url
 
 current_selected_label = None
@@ -105,7 +113,7 @@ def load_data(path, subsample=None, stratify_label=None, **addl_labels):
             else:
                 c = all_labels[k]['labels'][i]
             tmp.append(f"{k}: {c}")
-        display_text.append(f"idx: {idx[i]}\n" + " | ".join(tmp))
+        display_text.append(f"idx: {idx[i]}\n" + "\n".join(tmp))
 
 
     df_data = dict(x=emb[:, 0], y=emb[:, 1])
@@ -288,9 +296,9 @@ def build_app(directory, subsample=1.0, stratify_label=None, **addl_labels):
 
         fig = go.Figure()
         if selected_label not in classes:
-
-            global_min = df[selected_label].min()
-            global_max = df[selected_label].max()
+            data = df[selected_label]
+            global_min = data.min()
+            global_max = data.max()
             norm = Normalize(vmin=global_min, vmax=global_max)
             fig_kwargs = {var: df[var] for var in fig_vars}
 
@@ -312,7 +320,7 @@ def build_app(directory, subsample=1.0, stratify_label=None, **addl_labels):
                 name=selected_label,
                 marker=dict(
                     size=2,
-                    color=df[selected_label].values,
+                    color=data,
                     colorscale=plotly_colorscale,
                     colorbar=dict(
                         title=selected_label,
