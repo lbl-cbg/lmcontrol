@@ -263,8 +263,6 @@ def _add_training_args(parser):
 
     add_resnet_args(parser)
 
-    parser.add_argument("--return_embeddings", action='store_true', default=False, help="return ResNet features, rather than final output")
-
 
 def _get_loaders_and_model(args,  logger=None):
     train_transform = _get_transforms('float', 'norm', 'blur','rotate', 'random_crop','hflip', 'vflip', 'noise', 'rgb')
@@ -279,7 +277,7 @@ def _get_loaders_and_model(args,  logger=None):
 
 
     model = LightningResNet(train_loader.dataset.label_classes, lr=args.lr, step_size=args.step_size, gamma=args.gamma,
-                            block=args.block, planes=args.planes, layers=args.layers, return_embeddings=args.return_embeddings, time_weight=args.time_weight)
+                            block=args.block, planes=args.planes, layers=args.layers, time_weight=args.time_weight)
 
     return train_loader, val_loader, model
 

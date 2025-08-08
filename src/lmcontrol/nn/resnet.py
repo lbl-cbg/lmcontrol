@@ -181,8 +181,7 @@ def get_planes(plane_cmd):
 def get_layers(layers_cmd):
     """This is actually the number of resnet blocks to use, where we fix the size of each resnet block to be 1 layer."""
     l = int(layers_cmd)
-    #layers = [1 if i < l else 0 for i in range(4)]
-    layers = [2 if i < l else 0 for i in range(4)]
+    layers = [1 if i < l else 0 for i in range(4)]
     return layers
 
 
