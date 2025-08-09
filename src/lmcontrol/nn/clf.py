@@ -7,10 +7,10 @@ from typing import Type, Union, List, Optional, Callable, Any
 from functools import partial
 import lightning as L
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 import torchvision
-from torch import nn
-import torch
 import glob
 import numpy as np
 
@@ -57,6 +57,47 @@ class CrossEntropy(nn.Module):
 
     def forward(self, input, target):
         return self.nlll(torch.log(input), target)
+
+
+class MDNHead(nn.Module):
+
+    def __init__(self, input_dim, n_components=2):
+        super().__init__()
+        self.n_components = n_components
+        self.pi = nn.Linear(input_dim, n_components)        # mixing coefficients
+        self.mu = nn.Linear(input_dim, n_components)        # means
+        self.sigma = nn.Linear(input_dim, n_components)     # stddevs
+
+    def forward(self, x):
+        pi = F.softmax(self.pi(x), dim=-1)                  # mixing coefficients sum to 1
+        mu = self.mu(x)                                     # means
+        sigma = torch.exp(self.sigma(x))                    # positive stddevs
+        return pi, mu, sigma
+
+
+
+class MultivariateMDNHead(nn.Module):
+
+    def __init__(self, input_dim, output_dim, n_components=2):
+        super().__init__()
+        self.output_dim = output_dim
+        self.n_components = n_components
+
+        self._n_chol = (output_dim * (output_dim + 1) // 2)
+        self._L_diag_idx = torch.roll(torch.cumsum(torch.arange(output_dim), dim=0) - 1, -1)
+
+        self.pi = nn.Linear(input_dim, n_components)                            # mixing coefficients
+        self.mu = nn.Linear(input_dim, n_components * output_dim)               # means
+        self.sigma_L = nn.Linear(input_dim, n_components * self._n_chol)        # Cholesky factors
+
+    def forward(self, x):
+        pi = F.softmax(self.pi(x), dim=-1)                                      # mixing coefficients sum to 1
+        mu = self.mu(x).reshape(-1, self.n_components, self.output_dim)         # means
+
+        L = self.sigma_L(x).reshape(-1, self.n_components, self._n_chol)        # Cholesky factors
+        L[:, :, self._L_diag_idx] = torch.exp(L[:, :, self._L_diag_idx])        # positive diagonal factors
+
+        return pi, mu, L
 
 
 time_weight = 0.9
