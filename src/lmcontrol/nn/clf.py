@@ -1,5 +1,6 @@
 import argparse
 import glob
+import math
 import pickle
 import os
 from typing import Type, Union, List, Optional, Callable, Any
@@ -84,7 +85,7 @@ class MultivariateMDNHead(nn.Module):
         self.n_components = n_components
 
         self._n_chol = (output_dim * (output_dim + 1) // 2)
-        self._L_diag_idx = torch.roll(torch.cumsum(torch.arange(output_dim), dim=0) - 1, -1)
+        self._L_diag_idx = (torch.arange(output_dim) + 1) * (torch.arange(output_dim) + 2) // 2 - 1
 
         self.pi = nn.Linear(input_dim, n_components)                            # mixing coefficients
         self.mu = nn.Linear(input_dim, n_components * output_dim)               # means
@@ -100,10 +101,40 @@ class MultivariateMDNHead(nn.Module):
         return pi, mu, L
 
 
-time_weight = 0.9
+class MultivariateMDNLoss(nn.Module):
+
+    def __init__(self, output_dim):
+        super().__init__()
+        self.D = output_dim
+        self.norm_const = -0.5 * self.D * math.log(2 * math.pi)
+
+    def forward(self, pi, mu, L, target):
+        """
+        pi     (batch_size, n_components)
+        mu     (batch_size, n_components, output_dims)
+        L      (batch_size, n_components, output_dims * (output_dims + 1) // 2)
+        target (batch_size, output_dims)
+        """
+        diff = (target[:, None, :] - mu)[..., None]
+        L_sq = torch.zeros(L.shape[0], L.shape[1], self.D, self.D, device=L.device, dtype=L.dtype)
+        idx = torch.tril_indices(self.D, self.D)
+        L_sq[:, :, idx[0], idx[1]] = L
+
+        z = torch.linalg.solve_triangular(L_sq, diff, upper=False)                      # (batch_size, n_components, output_dims)
+        M = torch.sum(z.squeeze(-1)**2, dim=-1)                                         # (batch_size, n_components)
+
+        det = torch.sum(torch.log(torch.diagonal(L_sq, dim1=-2, dim2=-1)), dim=-1)  # (batch_size, n_components)
+
+        log_prob = self.norm_const - det - 0.5 * M
+
+        nlll = - torch.mean(torch.logsumexp(log_prob + torch.log(pi + 1e-10), 1))
+
+        return nlll
+
 
 class LightningResNet(L.LightningModule):
 
+    time_weight = 0.9
 
     loss_functions = {
         'time': nn.MSELoss(),
@@ -122,7 +153,7 @@ class LightningResNet(L.LightningModule):
 
 
     def __init__(self, label_classes, lr=0.01, step_size=2, gamma=0.1, planes=[8, 16, 32, 64],
-                 layers=[1, 1, 1, 1], block=BasicBlock, include_features=False, features_only=False, time_weight=1e-3):
+                 layers=[1, 1, 1, 1], block=BasicBlock, include_features=False, features_only=False):
         super().__init__()
 
         self.label_classes = label_classes
@@ -132,6 +163,15 @@ class LightningResNet(L.LightningModule):
         self.num_outputs = sum(self.label_counts)
 
         self.weighted_multilabel = False
+
+        if mdn == True:
+            include_features = False
+            features_only = True
+
+
+
+        self.backbone = ResNet(block=block, layers=layers, planes=planes, num_outputs=self.num_outputs,
+                               include_features=include_features, features_only=features_only)
 
         if self.num_outputs == len(self.label_classes):
             # Assume mult-label with the same loss type
@@ -151,9 +191,6 @@ class LightningResNet(L.LightningModule):
                         self.activations.append(nn.Flatten(start_dim=0))
                 else:
                     self.activations.append(nn.Softmax(dim=1))
-
-        self.backbone = ResNet(block=block, layers=layers, planes=planes, num_outputs=self.num_outputs,
-                               include_features=include_features, features_only=features_only)
 
         self.lr = lr
         self.step_size = step_size
