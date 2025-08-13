@@ -152,8 +152,8 @@ class LightningResNet(L.LightningModule):
     }
 
 
-    def __init__(self, label_classes, lr=0.01, step_size=2, gamma=0.1, planes=[8, 16, 32, 64],
-                 layers=[1, 1, 1, 1], block=BasicBlock, include_features=False, features_only=False):
+    def __init__(self, label_classes, lr=0.01, step_size=2, gamma=0.1, planes=[8, 16, 32, 64], layers=[1, 1, 1, 1],
+                 block=BasicBlock, include_features=False, features_only=False, n_components=None):
         super().__init__()
 
         self.label_classes = label_classes
@@ -164,18 +164,19 @@ class LightningResNet(L.LightningModule):
 
         self.weighted_multilabel = False
 
-        if mdn == True:
-            include_features = False
-            features_only = True
-
-
+        self.n_components = n_components
 
         self.backbone = ResNet(block=block, layers=layers, planes=planes, num_outputs=self.num_outputs,
                                include_features=include_features, features_only=features_only)
 
         if self.num_outputs == len(self.label_classes):
-            # Assume mult-label with the same loss type
-            self.criterion = nn.MSELoss()
+            # Assume multi-label with the same loss type
+            # self.criterion = nn.MSELoss()
+            self.criterion = MultivariateMDNLoss(self.num_outputs)
+            self.backbone = nn.Sequential(self.backbone,
+                                          MultivariateMDNHead(self.backbone.n_features,
+                                                              self.num_outputs,
+                                                              n_components=self.n_components))
             self.activations = None
         else:
             self.weighted_multilabel = True
@@ -246,41 +247,28 @@ class LightningResNet(L.LightningModule):
             mean_accuracy = total_accuracy / classification_tasks
             self.log(f'{step_type}_mean_accuracy', mean_accuracy, on_step=False, on_epoch=True)
 
-
-
     def training_step(self, batch, batch_idx):
-        images, labels = batch
-        outputs = self.forward(images)
-
-        total_loss = self.criterion(outputs, labels)
-
-        if isinstance(self.criterion, MultiLabelLoss):
-            # Keep this here, since it's for multilabel loss when we have different loss types
-            loss_components = self.criterion(outputs, labels)
-            self._score("train", outputs, loss_components, labels)
-            total_loss = sum(loss_components)
-            self.log('total_train_loss', total_loss)
-        else:
-            self.log('train_loss', total_loss)
-
-
-        return total_loss
-
+        return self._step('train', batch)
 
     def validation_step(self, batch, batch_idx):
+        return self._step('val', batch, on_step=False, on_epoch=True, sync_dist=True)
+
+    def _step(self, phase, batch, **log_kwargs):
         images, labels = batch
         outputs = self.forward(images)
-
-        total_loss = self.criterion(outputs, labels)
-
         if isinstance(self.criterion, MultiLabelLoss):
             # Keep this here, since it's for multilabel loss when we have different loss types
             loss_components = self.criterion(outputs, labels)
-            self._score("val", outputs, loss_components, labels)
+            self._score(phase, outputs, loss_components, labels)
             total_loss = sum(loss_components)
-            self.log('total_val_loss', total_loss, on_step=False, on_epoch=True, sync_dist=True)
+            self.log(f'total_{phase}_loss', total_loss)
         else:
-            self.log('val_loss', total_loss, on_step=False, on_epoch=True, sync_dist=True)
+            if isinstance(self.criterion, MultivariateMDNLoss):
+                pi, mu, L = outputs
+                total_loss = self.criterion(pi, mu, L, labels)
+            else:
+                total_loss = self.criterion(outputs, labels)
+            self.log(f'{phase}_loss', total_loss)
 
         return total_loss
 
@@ -353,9 +341,15 @@ def _get_loaders_and_model(args,  logger=None):
                                            val_tfm=val_transform,
                                            return_labels=True)
 
+    model_kwargs = dict(lr=args.lr, step_size=args.step_size, gamma=args.gamma, block=args.block, planes=args.planes,
+                        layers=args.layers)
 
-    model = LightningResNet(train_loader.dataset.label_classes, lr=args.lr, step_size=args.step_size, gamma=args.gamma,
-                            block=args.block, planes=args.planes, layers=args.layers, time_weight=args.time_weight)
+    if args.label == ['fcs']:
+        model_kwargs['features_only'] = True
+        model_kwargs['include_features'] = False
+        model_kwargs['n_components'] = 2
+
+    model = LightningResNet(train_loader.dataset.label_classes, **model_kwargs)
 
     return train_loader, val_loader, model
 
