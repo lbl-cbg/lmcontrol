@@ -1,5 +1,6 @@
 import argparse
 import glob
+import math
 import pickle
 import os
 from typing import Type, Union, List, Optional, Callable, Any
@@ -7,10 +8,10 @@ from typing import Type, Union, List, Optional, Callable, Any
 from functools import partial
 import lightning as L
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 import torchvision
-from torch import nn
-import torch
 import glob
 import numpy as np
 
@@ -59,10 +60,81 @@ class CrossEntropy(nn.Module):
         return self.nlll(torch.log(input), target)
 
 
-time_weight = 0.9
+class MDNHead(nn.Module):
+
+    def __init__(self, input_dim, n_components=2):
+        super().__init__()
+        self.n_components = n_components
+        self.pi = nn.Linear(input_dim, n_components)        # mixing coefficients
+        self.mu = nn.Linear(input_dim, n_components)        # means
+        self.sigma = nn.Linear(input_dim, n_components)     # stddevs
+
+    def forward(self, x):
+        pi = F.softmax(self.pi(x), dim=-1)                  # mixing coefficients sum to 1
+        mu = self.mu(x)                                     # means
+        sigma = torch.exp(self.sigma(x))                    # positive stddevs
+        return pi, mu, sigma
+
+
+
+class MultivariateMDNHead(nn.Module):
+
+    def __init__(self, input_dim, output_dim, n_components=2):
+        super().__init__()
+        self.output_dim = output_dim
+        self.n_components = n_components
+
+        self._n_chol = (output_dim * (output_dim + 1) // 2)
+        self._L_diag_idx = (torch.arange(output_dim) + 1) * (torch.arange(output_dim) + 2) // 2 - 1
+
+        self.pi = nn.Linear(input_dim, n_components)                            # mixing coefficients
+        self.mu = nn.Linear(input_dim, n_components * output_dim)               # means
+        self.sigma_L = nn.Linear(input_dim, n_components * self._n_chol)        # Cholesky factors
+
+    def forward(self, x):
+        pi = F.softmax(self.pi(x), dim=-1)                                      # mixing coefficients sum to 1
+        mu = self.mu(x).reshape(-1, self.n_components, self.output_dim)         # means
+
+        L = self.sigma_L(x).reshape(-1, self.n_components, self._n_chol)        # Cholesky factors
+        L[:, :, self._L_diag_idx] = torch.exp(L[:, :, self._L_diag_idx])        # positive diagonal factors
+
+        return pi, mu, L
+
+
+class MultivariateMDNLoss(nn.Module):
+
+    def __init__(self, output_dim):
+        super().__init__()
+        self.D = output_dim
+        self.norm_const = -0.5 * self.D * math.log(2 * math.pi)
+
+    def forward(self, pi, mu, L, target):
+        """
+        pi     (batch_size, n_components)
+        mu     (batch_size, n_components, output_dims)
+        L      (batch_size, n_components, output_dims * (output_dims + 1) // 2)
+        target (batch_size, output_dims)
+        """
+        diff = (target[:, None, :] - mu)[..., None]
+        L_sq = torch.zeros(L.shape[0], L.shape[1], self.D, self.D, device=L.device, dtype=L.dtype)
+        idx = torch.tril_indices(self.D, self.D)
+        L_sq[:, :, idx[0], idx[1]] = L
+
+        z = torch.linalg.solve_triangular(L_sq, diff, upper=False)                      # (batch_size, n_components, output_dims)
+        M = torch.sum(z.squeeze(-1)**2, dim=-1)                                         # (batch_size, n_components)
+
+        det = torch.sum(torch.log(torch.diagonal(L_sq, dim1=-2, dim2=-1)), dim=-1)  # (batch_size, n_components)
+
+        log_prob = self.norm_const - det - 0.5 * M
+
+        nlll = - torch.mean(torch.logsumexp(log_prob + torch.log(pi + 1e-10), 1))
+
+        return nlll
+
 
 class LightningResNet(L.LightningModule):
 
+    time_weight = 0.9
 
     loss_functions = {
         'time': nn.MSELoss(),
@@ -80,8 +152,8 @@ class LightningResNet(L.LightningModule):
     }
 
 
-    def __init__(self, label_classes, lr=0.01, step_size=2, gamma=0.1, planes=[8, 16, 32, 64],
-                 layers=[1, 1, 1, 1], block=BasicBlock, include_features=False, features_only=False, time_weight=1e-3):
+    def __init__(self, label_classes, lr=0.01, step_size=2, gamma=0.1, planes=[8, 16, 32, 64], layers=[1, 1, 1, 1],
+                 block=BasicBlock, include_features=False, features_only=False, n_components=None):
         super().__init__()
 
         self.label_classes = label_classes
@@ -92,9 +164,19 @@ class LightningResNet(L.LightningModule):
 
         self.weighted_multilabel = False
 
+        self.n_components = n_components
+
+        self.backbone = ResNet(block=block, layers=layers, planes=planes, num_outputs=self.num_outputs,
+                               include_features=include_features, features_only=features_only)
+
         if self.num_outputs == len(self.label_classes):
-            # Assume mult-label with the same loss type
-            self.criterion = nn.MSELoss()
+            # Assume multi-label with the same loss type
+            # self.criterion = nn.MSELoss()
+            self.criterion = MultivariateMDNLoss(self.num_outputs)
+            self.backbone = nn.Sequential(self.backbone,
+                                          MultivariateMDNHead(self.backbone.n_features,
+                                                              self.num_outputs,
+                                                              n_components=self.n_components))
             self.activations = None
         else:
             self.weighted_multilabel = True
@@ -110,9 +192,6 @@ class LightningResNet(L.LightningModule):
                         self.activations.append(nn.Flatten(start_dim=0))
                 else:
                     self.activations.append(nn.Softmax(dim=1))
-
-        self.backbone = ResNet(block=block, layers=layers, planes=planes, num_outputs=self.num_outputs,
-                               include_features=include_features, features_only=features_only)
 
         self.lr = lr
         self.step_size = step_size
@@ -168,41 +247,28 @@ class LightningResNet(L.LightningModule):
             mean_accuracy = total_accuracy / classification_tasks
             self.log(f'{step_type}_mean_accuracy', mean_accuracy, on_step=False, on_epoch=True)
 
-
-
     def training_step(self, batch, batch_idx):
-        images, labels = batch
-        outputs = self.forward(images)
-
-        total_loss = self.criterion(outputs, labels)
-
-        if isinstance(self.criterion, MultiLabelLoss):
-            # Keep this here, since it's for multilabel loss when we have different loss types
-            loss_components = self.criterion(outputs, labels)
-            self._score("train", outputs, loss_components, labels)
-            total_loss = sum(loss_components)
-            self.log('total_train_loss', total_loss)
-        else:
-            self.log('train_loss', total_loss)
-
-
-        return total_loss
-
+        return self._step('train', batch)
 
     def validation_step(self, batch, batch_idx):
+        return self._step('val', batch, on_step=False, on_epoch=True, sync_dist=True)
+
+    def _step(self, phase, batch, **log_kwargs):
         images, labels = batch
         outputs = self.forward(images)
-
-        total_loss = self.criterion(outputs, labels)
-
         if isinstance(self.criterion, MultiLabelLoss):
             # Keep this here, since it's for multilabel loss when we have different loss types
             loss_components = self.criterion(outputs, labels)
-            self._score("val", outputs, loss_components, labels)
+            self._score(phase, outputs, loss_components, labels)
             total_loss = sum(loss_components)
-            self.log('total_val_loss', total_loss, on_step=False, on_epoch=True, sync_dist=True)
+            self.log(f'total_{phase}_loss', total_loss)
         else:
-            self.log('val_loss', total_loss, on_step=False, on_epoch=True, sync_dist=True)
+            if isinstance(self.criterion, MultivariateMDNLoss):
+                pi, mu, L = outputs
+                total_loss = self.criterion(pi, mu, L, labels)
+            else:
+                total_loss = self.criterion(outputs, labels)
+            self.log(f'{phase}_loss', total_loss)
 
         return total_loss
 
@@ -275,9 +341,15 @@ def _get_loaders_and_model(args,  logger=None):
                                            val_tfm=val_transform,
                                            return_labels=True)
 
+    model_kwargs = dict(lr=args.lr, step_size=args.step_size, gamma=args.gamma, block=args.block, planes=args.planes,
+                        layers=args.layers)
 
-    model = LightningResNet(train_loader.dataset.label_classes, lr=args.lr, step_size=args.step_size, gamma=args.gamma,
-                            block=args.block, planes=args.planes, layers=args.layers, time_weight=args.time_weight)
+    if args.label == ['fcs']:
+        model_kwargs['features_only'] = True
+        model_kwargs['include_features'] = False
+        model_kwargs['n_components'] = 2
+
+    model = LightningResNet(train_loader.dataset.label_classes, **model_kwargs)
 
     return train_loader, val_loader, model
 
