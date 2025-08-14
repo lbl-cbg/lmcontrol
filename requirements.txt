@@ -1,3 +1,6 @@
+--extra-index-url https://pypi.nvidia.com
+--extra-index-url https://download.pytorch.org/whl/cu129
+
 numpy
 scikit-image
 scikit-learn
@@ -7,7 +10,6 @@ umap-learn
 plotly
 dash
 seaborn
-torch
 lightning
 lightly
 Pillow
@@ -22,4 +24,6 @@ opencv-python
 imagecodecs
 openpyxl
 git+https://github.com/lbl-cbg/FlowKit.git
---extra-index-url=https://pypi.nvidia.com "cuml-cu12==25.6.*"
+cuml-cu12==25.6.*
+torch
+torchvision

@@ -3,10 +3,13 @@ channels:
   - nvidia
   - defaults
   - conda-forge
+  - rapids
 dependencies:
+  - python=3.13
   - pytorch
   - torchvision
   - torchaudio
+  - rapids
   - pytorch-cuda=12.4
   - pip
   - pip:
@@ -36,3 +39,5 @@ dependencies:
     - cuml-cu12
     - cugraph-cu12
     - git+https://github.com/hdmf-dev/hdmf-ai@0.3.0
+    - openpyxl
+    - git+https://github.com/lbl-cbg/FlowKit.git
