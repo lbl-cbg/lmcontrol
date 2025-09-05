@@ -369,6 +369,15 @@ class LMDataset(Dataset):
       'YL4-A', 'YL4-H', 'YL4-W'
     ]
 
+    FC_NORM = {
+            'FSC-A': 1048576.0,
+            'FSC-H': 1048576.0,
+            'FSC-W': 1048576.0,
+            'SSC-A': 1048576.0,
+            'SSC-H': 1048576.0,
+            'SSC-W': 1048576.0,
+    }
+
 
     __regression_labels = {'time'}
 
