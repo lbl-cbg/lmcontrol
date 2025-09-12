@@ -10,13 +10,15 @@ from sklearn.model_selection import train_test_split
 from hdmf.common import get_hdf5io, EnumData
 
 from ..data_utils import encode_labels, load_npzs
-from ..utils import get_logger
+from ..utils import get_logger, import_ml
 
 import torch
 import torch.nn as nn
 import torchvision.transforms.functional as TF
 from torchvision.transforms import InterpolationMode
 from torch.utils.data import Dataset
+
+KernelDensity = import_ml("neighbors.KernelDensity")
 
 
 class RGB(nn.Module):
@@ -345,6 +347,36 @@ class SequentialTwoInputs(nn.Module):
         return x1, x2
 
 
+def compute_densities(X):
+    # X: (n_samples, n_features)
+
+    # Whiten our samples
+    mean = np.mean(X, axis=0)
+    X_centered = X - mean
+    cov = np.cov(X_centered, rowvar=False)
+    eigvals, eigvecs = np.linalg.eigh(cov)
+    # Whitening matrix
+    W = eigvecs @ np.diag(1.0 / np.sqrt(eigvals)) @ eigvecs.T
+    X_white = X_centered @ W
+
+    # Compute bandwidth as Scott's factor
+    n, d = X.shape
+    bw = np.power(n, -1.0 / (d + 4))
+
+    # Fit KDE
+    kde = KernelDensity(kernel='gaussian', bandwidth=bw)
+    kde.fit(X_white)
+
+    # Compute sample densities in batches
+    b = 1024
+    densities = list()
+    for i in range(0, X_white.shape[0], b):
+        densities.append(np.exp(kde.score_samples(X_white[i:i+b])).get())
+    densities = np.concatenate(densities)
+
+    return densities
+
+
 class LMDataset(Dataset):
     """
 
@@ -388,7 +420,7 @@ class LMDataset(Dataset):
         return (label in cls.__regression_labels) or (label in cls.FC_COLS)
 
     def __init__(self, path, label_classes=None, return_labels=False, logger=None, transform=None,
-                 label=None, split=None, rand_split=False, exp_split=False, split_seed=None):
+                 label=None, split=None, rand_split=False, exp_split=False, split_seed=None, return_weights=False):
         """
 
         Args:
@@ -430,6 +462,7 @@ class LMDataset(Dataset):
 
         # Labels for each sample
         self.sample_labels = None
+        self.weights = None
 
         self.transform = transform
 
@@ -447,6 +480,12 @@ class LMDataset(Dataset):
         self.table = None
 
         self.open()
+
+        if return_weights:
+            X = np.array(self.sample_labels).T
+            densities = compute_densities(X)
+            self.weights = self._compute_weights(densities).astype(np.float32)
+
         self.__len = len(self.table)
 
         self.exp_split = exp_split
@@ -471,6 +510,18 @@ class LMDataset(Dataset):
         # self.label_classes is set up so that we can specify label_classes or compute them on the fly.
         # We want to specify them after they have been computed to ensure the same label classes are
         # used across splits (e.g. training, validation, test sets)
+
+    def _compute_weights_log(self, densities):
+        weights = -np.log10(densities/densities.sum())
+        a, b = weights.min(), weights.max()
+        weights = (weights - a) / (b - a)
+        return weights
+
+    def _compute_weights(self, densities):
+        weights = 1 / densities
+        a, b = weights.min(), weights.max()
+        weights = (weights - a) / (b - a)
+        return weights
 
     def open(self, worker_id=None):
         """Open file for reading if it is not currently open"""
@@ -498,10 +549,10 @@ class LMDataset(Dataset):
                         labels = labels.astype(np.float32)
                     self.sample_labels.append(labels)
 
+
     def close(self):
         self.io.close()
         self.table = None
-        self.sample_labels = None
         self.io = None
 
     def set_random_split(self, val_frac, test_frac, seed=None):
@@ -563,7 +614,10 @@ class LMDataset(Dataset):
             # Keep this here, since it's for mulltlabel loss when we have different loss types
             # return ret, tuple(ret_tmp)
 
-            return ret, torch.Tensor(ret_tmp)
+            if self.weights is not None:
+                return ret, torch.Tensor(ret_tmp), torch.tensor(self.weights[i])
+            else:
+                return ret, torch.Tensor(ret_tmp)
 
     def __len__(self):
         return self.__len

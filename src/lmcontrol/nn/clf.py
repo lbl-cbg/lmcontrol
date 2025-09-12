@@ -6,8 +6,6 @@ import pickle
 import os
 from typing import Type, Union, List, Optional, Callable, Any
 
-
-
 from functools import partial
 import lightning as pl
 import torch
@@ -33,11 +31,13 @@ from torchvision.models.resnet import BasicBlock, Bottleneck
 from hdmf_ai.results_table import ResultsTable, RegressionOutput
 from hdmf.common import get_hdf5io
 
-from ..utils import get_logger, parse_seed, format_time_diff, get_metadata_info
+from ..utils import get_logger, parse_seed, format_time_diff, get_metadata_info, import_ml
 from ..data_utils import load_npzs, encode_labels
 from .dataset import LMDataset, get_transforms as _get_transforms
 from .resnet import ResNet, add_args as add_resnet_args
 from .utils import get_loaders, get_trainer
+
+UMAP = import_ml("UMAP", alt="umap")
 
 
 class MultiLabelLoss(nn.Module):
@@ -190,7 +190,7 @@ class GatedMDNLoss(nn.Module):
         self.register_buffer('tril_idx', torch.tril_indices(output_dim, output_dim))
         # Pre-compute indices
 
-    def forward(self, pi, mu, L_constrained, target):
+    def forward(self, pi, mu, L_constrained, target, weights=None):
         """
         pi             (batch_size, n_components)
         mu             (n_components, output_dims)
@@ -226,9 +226,14 @@ class GatedMDNLoss(nn.Module):
         weighted_log_probs = log_probs + torch.log(pi + 1e-10)
 
         # Negative log likelihood
-        nll = -torch.mean(torch.logsumexp(weighted_log_probs, dim=1))
+        nll = -torch.logsumexp(weighted_log_probs, dim=1)
 
-        return nll
+        if weights is not None:
+            loss = (weights * nll).sum() / weights.sum()
+        else:
+            loss = nll.mean()
+
+        return loss
 
 
 class LightningResNet(pl.LightningModule):
@@ -296,10 +301,14 @@ class LightningResNet(pl.LightningModule):
         return self._step('val', batch, on_step=False, on_epoch=True, sync_dist=True)
 
     def _step(self, phase, batch, **log_kwargs):
-        images, labels = batch
+        weights = None
+        if len(batch) == 3:
+            images, labels, weights = batch
+        else:
+            images, labels = batch
         features, outputs = self.forward(images)
         pi = self.mdn_head(outputs)
-        total_loss = self.criterion(pi, self.mdn_head.mu, self.mdn_head.sigma_L, labels)
+        total_loss = self.criterion(pi, self.mdn_head.mu, self.mdn_head.sigma_L, labels, weights=weights)
         self.log(f'{phase}_loss', total_loss, **log_kwargs)
         return total_loss
 
@@ -373,6 +382,7 @@ def _get_loaders_and_model(args,  logger=None):
                                            inference=False,
                                            train_tfm=train_transform,
                                            val_tfm=val_transform,
+                                           return_weights=True,
                                            return_labels=True)
 
     if args.checkpoint is not None:
@@ -515,6 +525,7 @@ def predict(argv=None):
                          inference=True,
                          tfm=transform,
                          return_labels=True,
+                         return_weights=False,
                          logger=logger)
 
     dataset = loader.dataset

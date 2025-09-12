@@ -2,8 +2,10 @@ from datetime import datetime
 import logging
 import sys
 
+import importlib
 from importlib import resources
 import yaml
+import cupy
 
 def parse_logger(string, stream=sys.stderr, level='info'):
     if not string:
@@ -65,3 +67,17 @@ def format_time_diff(total_seconds):
         parts.append(f"{seconds}s")
 
     return " ".join(parts)
+
+
+def import_ml(cls_path, alt='sklearn'):
+    """Import RAPIDS ML class if GPU available, otherwise use Scikit-Learn class"""
+    if cls_path.startswith('cuml.'):
+        cls_path = cls_path[5:]
+    elif cls_path.startswith('sklearn.'):
+        cls_path = cls_path[8:]
+
+    parts = cls_path.split('.')
+    parts.insert(0, 'cuml' if cupy.cuda.is_available() else alt)
+    mod = importlib.import_module('.'.join(parts[:-1]))
+
+    return getattr(mod, parts[-1])
