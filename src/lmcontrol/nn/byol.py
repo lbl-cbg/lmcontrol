@@ -1,39 +1,30 @@
 import argparse
 import copy
-import glob
 import os
 import sys
 import math
-
 import warnings
-warnings.filterwarnings("ignore", category=UserWarning, message=".*ToTensor().*")
-warnings.filterwarnings("ignore", category=UserWarning, message=".*EnumData.*")
-
 
 import lightning as L
-from lightning.pytorch.loggers import WandbLogger, CSVLogger
 from lightning.pytorch.callbacks import Timer
-
-import numpy as np
 
 from hdmf_ai import ResultsTable
 from hdmf.common import get_hdf5io
 
 import torch
-from torch.utils.data import DataLoader
-import torchvision
-from torch import nn
 
 from lightly.loss import NegativeCosineSimilarity
 from lightly.models.modules import BYOLPredictionHead, BYOLProjectionHead
 from lightly.models.utils import deactivate_requires_grad, update_momentum
 from lightly.utils.scheduler import cosine_schedule
-from optuna.integration import PyTorchLightningPruningCallback
 
 from ..utils import get_logger, parse_seed, format_time_diff
-from .dataset import LMDataset, get_transforms as _get_transforms
-from .resnet import ResNet, Bottleneck, get_block, get_planes, get_layers
+from .dataset import get_transforms as _get_transforms
+from .resnet import ResNet, Bottleneck, get_block, get_planes
 from .utils import get_loaders, get_trainer
+
+warnings.filterwarnings("ignore", category=UserWarning, message=".*ToTensor().*")
+warnings.filterwarnings("ignore", category=UserWarning, message=".*EnumData.*")
 
 
 class MultiViewTransform:

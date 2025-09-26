@@ -1,9 +1,7 @@
 import argparse
 import io
 import base64
-import json
 
-import pickle
 import os
 
 from dash import Dash, dcc, html, Input, Output, no_update, callback, State
@@ -15,15 +13,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-import plotly.colors as pc
-import plotly.graph_objects as go
-import plotly.express as px
 
-from matplotlib.colors import SymLogNorm, Normalize, LinearSegmentedColormap
+from matplotlib.colors import LinearSegmentedColormap
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder
 
-from hdmf_ai import ResultsTable
 from hdmf.common import get_hdf5io, EnumData
 
 metadata_info = None
@@ -124,12 +117,8 @@ def load_data(path, subsample=None, stratify_label=None, **addl_labels):
     df_data['images'] = encoded_images
     df_data['text'] = display_text
 
-    df_data1 = []
-
     for k in all_labels:
         df_data[k] = all_labels[k]['labels']
-        if k == 'time':
-            df_data1 = all_labels[k]['labels'].tolist()
 
     df = pd.DataFrame(df_data)
     classes = {k: np.arange(all_labels[k]['classes'].shape[0]) for k in all_labels if 'classes' in all_labels[k]}
@@ -299,7 +288,6 @@ def build_app(directory, subsample=1.0, stratify_label=None, **addl_labels):
             data = df[selected_label]
             global_min = data.min()
             global_max = data.max()
-            norm = Normalize(vmin=global_min, vmax=global_max)
             fig_kwargs = {var: df[var] for var in fig_vars}
 
             custom_cmap = LinearSegmentedColormap.from_list(

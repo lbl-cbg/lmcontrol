@@ -1,4 +1,3 @@
-import numpy as np
 from importlib import import_module
 
 class Command:
@@ -16,21 +15,17 @@ def main():
 
     command_dict = {
         'Data preparation': {
-            'make-commands': Command('command.main', 'Make commands for cropping'),
-            'make-spec': Command('merge.make_spec', 'Make data table specification'),
+            'segment': Command('segment.main', 'Segment light microscopy images to bounding box around single cell'),
             'merge': Command('merge.main', 'Merge data into monolithic HDMF file'),
+            'add-md': Command('segment.add_metadata', 'Add metadata to cropped image package'),
+            'make-commands': Command('command.main', 'Make commands for cropping'),
             'ls-metadata': Command('merge.ls_metadata', 'List the metadata available in segmentation NPZ'),
         },
-        'Segmentation': {
-            'segment': Command('segment.main', 'Segment light microscopy images to bounding box around single cell'),
-            'add-md': Command('segment.add_metadata', 'Add metadata to cropped image package'),
-            'prep-viz': Command('viz.make_package.main', 'Prepare package for visualizing image embeddings'),
-            'add-md': Command('segment.add_metadata', 'Add metadata to cropped image package'),
+        'Visualization': {
             'emb-viz': Command('viz.interactive_viz.main', 'Interactive viewer of image embeddings'),
         },
         'Self-supervised Learning': {
             'train-byol': Command('nn.byol.train', 'Train BYOL model'),
-
             'infer-byol': Command('nn.byol.predict', 'Run with inference BYOL backbone'),
         },
         'Supervised Learning':{
@@ -47,7 +42,6 @@ def main():
             print(f' {g}')
             for c, f in d.items():
                 nspaces = 16 - len(c)
-                desc = ''
                 print(f'    {c}' + ' '*nspaces + f.doc)
             print()
     else:

@@ -2,12 +2,9 @@ import argparse
 import glob
 import io
 import os
-from pathlib import Path
 import re
 from zipfile import BadZipFile, ZipFile
-import uuid
 import hashlib
-import json
 
 
 from typing import Dict, Iterable, Any, Tuple, Optional
@@ -16,7 +13,6 @@ import flowkit as fk
 from numba import njit
 import numpy as np
 import pandas as pd
-import scipy.ndimage as ndi
 from skimage.filters import median
 import skimage.io as sio
 from skimage.measure import label
@@ -202,10 +198,10 @@ def metadata_str(string):
                     try:
                         v = t(v)
                         break
-                    except:
+                    except Exception:
                         v = ret[k]
                 ret[k] = v
-        except:
+        except Exception:
             raise argparse.ArgumentTypeError()
         return ret
     return dict()
@@ -415,9 +411,11 @@ def pad_images_to_max_size(image_list, padval=None):
     padded_images = []
 
     if padval is None:
-        padval_func = lambda img: np.median(img)
+        def padval_func(img):
+            return np.median(img)
     else:
-        padval_func = lambda img: padval
+        def padval_func(img):
+            return padval
 
     for img in image_list:
         # Calculate padding needed
@@ -650,8 +648,8 @@ def main(argv=None):
                 x, y = string.split(',')  ###
                 x, y = int(x), int(y)
                 return (x, y)
-            except:
-                raise ArgumentTypeError()
+            except Exception:
+                raise argparse.ArgumentTypeError()
 
     desc = "Identify cells in flow-cytometer images and crop images down to single cells"
     epi = """
