@@ -1,13 +1,20 @@
 import argparse
+import glob
+from itertools import product
 import math
 import pickle
 import os
 
 from functools import partial
-import lightning as L
+import lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.data import DataLoader
+import torchvision
+import glob
+import numpy as np
+from sklearn.mixture import GaussianMixture
 
 import optuna
 
@@ -19,10 +26,13 @@ from torchvision.models.resnet import BasicBlock, Bottleneck
 from hdmf_ai.results_table import ResultsTable, RegressionOutput
 from hdmf.common import get_hdf5io
 
-from ..utils import get_logger, parse_seed, format_time_diff, get_metadata_info
+from ..utils import get_logger, parse_seed, format_time_diff, get_metadata_info, import_ml
+from ..data_utils import load_npzs, encode_labels
 from .dataset import LMDataset, get_transforms as _get_transforms
 from .resnet import ResNet, add_args as add_resnet_args
 from .utils import get_loaders, get_trainer
+
+UMAP = import_ml("UMAP", alt="umap")
 
 
 class MultiLabelLoss(nn.Module):
@@ -49,79 +59,179 @@ class CrossEntropy(nn.Module):
         return self.nlll(torch.log(input), target)
 
 
-class MDNHead(nn.Module):
-
-    def __init__(self, input_dim, n_components=2):
-        super().__init__()
-        self.n_components = n_components
-        self.pi = nn.Linear(input_dim, n_components)        # mixing coefficients
-        self.mu = nn.Linear(input_dim, n_components)        # means
-        self.sigma = nn.Linear(input_dim, n_components)     # stddevs
-
-    def forward(self, x):
-        pi = F.softmax(self.pi(x), dim=-1)                  # mixing coefficients sum to 1
-        mu = self.mu(x)                                     # means
-        sigma = torch.exp(self.sigma(x))                    # positive stddevs
-        return pi, mu, sigma
+def compute_cov(sigma_L):
+    D = int((math.sqrt(1 + 8 * sigma_L.shape[1]) - 1) // 2)
+    L_sq = torch.zeros(sigma_L.shape[0], D, D, device=sigma_L.device, dtype=sigma_L.dtype)
+    tril_idx = torch.tril_indices(D, D)
+    L_sq[:, tril_idx[0], tril_idx[1]] = sigma_L
+    return L_sq.matmul(L_sq.transpose(1, 2))
 
 
 
-class MultivariateMDNHead(nn.Module):
+def init_mdn(data, random_state=42):
+    """
+    Find univariate modes for each variable using GMM, then return all combinations
+    along with Cholesky factors for each covariance matrix
 
-    def __init__(self, input_dim, output_dim, n_components=2):
+    Parameters:
+    -----------
+    data : numpy.ndarray
+        Nx2 matrix where each column is a variable
+    random_state : int
+        Random state for reproducible results
+
+    Returns:
+    --------
+    modes : numpy.ndarray
+        4x2 matrix containing all combinations of univariate modes
+        Each row is [mode_var1, mode_var2]
+    chol_factors : numpy.ndarray
+        4x3 array containing Cholesky factors of the covariances for combination of univariate modes
+    """
+
+    if data.shape[1] != 2:
+        raise ValueError("Input data must be Nx2 matrix")
+
+    # Fit GMM with 2 components for each variable
+    gmm1 = GaussianMixture(n_components=2, random_state=random_state).fit(data[:, 0].reshape(-1, 1))
+    gmm2 = GaussianMixture(n_components=2, random_state=random_state).fit(data[:, 1].reshape(-1, 1))
+
+    # Extract modes (means of the components) and covariances
+    modes_var1 = gmm1.means_.flatten()
+    modes_var2 = gmm2.means_.flatten()
+
+    # For univariate case, covariances are just variances (scalars)
+    covariances_var1 = gmm1.covariances_.flatten()  # Shape: (2,)
+    covariances_var2 = gmm2.covariances_.flatten()  # Shape: (2,)
+
+    # Sort modes and covariances consistently
+    sort_idx1 = np.argsort(modes_var1)
+    sort_idx2 = np.argsort(modes_var2)
+
+    modes_var1 = modes_var1[sort_idx1]
+    modes_var2 = modes_var2[sort_idx2]
+
+    covariances_var1 = covariances_var1[sort_idx1]
+    covariances_var2 = covariances_var2[sort_idx2]
+
+    # Generate all combinations of modes
+    mode_combinations = list(product(modes_var1, modes_var2))
+    modes_matrix = np.array(mode_combinations)
+
+    # Generate all combinations of covariances
+    # Create 2x2 covariance matrices assuming independence between variables
+    chol_factors = []
+    for cov1, cov2 in product(covariances_var1, covariances_var2):
+        # Create diagonal covariance matrix (assuming independence)
+        cov_matrix = np.array([[cov1, 0],
+                              [0, cov2]])
+        chol_factors.append(np.sqrt([cov1, 0, cov2]))
+
+    chol_factors = np.array(chol_factors)
+
+    return torch.tensor(modes_matrix), torch.tensor(chol_factors)
+
+
+class GatedMultivariateMDNHead(nn.Module):
+
+    def __init__(self, output_dim, n_components=4, init_mu=None, init_L=None):
         super().__init__()
         self.output_dim = output_dim
         self.n_components = n_components
 
         self._n_chol = (output_dim * (output_dim + 1) // 2)
-        self._L_diag_idx = (torch.arange(output_dim) + 1) * (torch.arange(output_dim) + 2) // 2 - 1
 
-        self.pi = nn.Linear(input_dim, n_components)                            # mixing coefficients
-        self.mu = nn.Linear(input_dim, n_components * output_dim)               # means
-        self.sigma_L = nn.Linear(input_dim, n_components * self._n_chol)        # Cholesky factors
+        # Pre-compute diagonal indices
+        L_diag_idx = (torch.arange(output_dim) + 1) * (torch.arange(output_dim) + 2) // 2 - 1
+        self.register_buffer('_L_diag_idx', L_diag_idx)
+
+        # Fixed component parameters (raw, unconstrained)
+        mu_tmp = torch.randn(n_components, output_dim)
+        if init_mu is not None:
+            if init_mu.shape != mu_tmp.shape:
+                raise ValueError(f"init_mu has incorrect shape: Got {init_mu.shape}, expected {mu_tmp.shape}")
+            mu_tmp = init_mu.detach().clone().to(torch.float32)
+        self.mu = nn.Parameter(mu_tmp)
+        L_tmp = torch.randn(n_components, self._n_chol)
+        if init_L is not None:
+            if init_L.shape != L_tmp.shape:
+                raise ValueError(f"init_L has incorrect shape: Got {init_L.shape}, expected {L_tmp.shape}")
+            L_tmp = init_L.detach().clone().to(torch.float32)
+            L_tmp[:, self._L_diag_idx] = torch.log(L_tmp[:, self._L_diag_idx])
+        self._sigma_L_raw = nn.Parameter(L_tmp)
+
+    @property
+    def sigma_L(self):
+        """Get constrained Cholesky factors"""
+        L = self._sigma_L_raw.clone()
+        L[:, self._L_diag_idx] = torch.exp(L[:, self._L_diag_idx])
+        return L
 
     def forward(self, x):
-        pi = F.softmax(self.pi(x), dim=-1)                                      # mixing coefficients sum to 1
-        mu = self.mu(x).reshape(-1, self.n_components, self.output_dim)         # means
+        # Input-dependent mixing coefficients
+        pi = F.softmax(x, dim=-1)
 
-        L = self.sigma_L(x).reshape(-1, self.n_components, self._n_chol)        # Cholesky factors
-        L[:, :, self._L_diag_idx] = torch.exp(L[:, :, self._L_diag_idx])        # positive diagonal factors
-
-        return pi, mu, L
+        return pi
 
 
-class MultivariateMDNLoss(nn.Module):
+class GatedMDNLoss(nn.Module):
 
     def __init__(self, output_dim):
         super().__init__()
         self.D = output_dim
         self.norm_const = -0.5 * self.D * math.log(2 * math.pi)
 
-    def forward(self, pi, mu, L, target):
+        # Pre-compute indices
+        self.register_buffer('tril_idx', torch.tril_indices(output_dim, output_dim))
+        # Pre-compute indices
+
+    def forward(self, pi, mu, L_constrained, target, weights=None):
         """
-        pi     (batch_size, n_components)
-        mu     (batch_size, n_components, output_dims)
-        L      (batch_size, n_components, output_dims * (output_dims + 1) // 2)
-        target (batch_size, output_dims)
+        pi             (batch_size, n_components)
+        mu             (n_components, output_dims)
+        L_constrained  (n_components, n_chol) - ALREADY CONSTRAINED
+        target         (batch_size, output_dims)
         """
-        diff = (target[:, None, :] - mu)[..., None]
-        L_sq = torch.zeros(L.shape[0], L.shape[1], self.D, self.D, device=L.device, dtype=L.dtype)
-        idx = torch.tril_indices(self.D, self.D)
-        L_sq[:, :, idx[0], idx[1]] = L
+        batch_size, n_components = pi.shape
 
-        z = torch.linalg.solve_triangular(L_sq, diff, upper=False)                      # (batch_size, n_components, output_dims)
-        M = torch.sum(z.squeeze(-1)**2, dim=-1)                                         # (batch_size, n_components)
+        # Build all Cholesky matrices at once (no constraints needed here!)
+        L_sq = torch.zeros(n_components, self.D, self.D, device=target.device, dtype=target.dtype)
+        L_sq[:, self.tril_idx[0], self.tril_idx[1]] = L_constrained
 
-        det = torch.sum(torch.log(torch.diagonal(L_sq, dim1=-2, dim2=-1)), dim=-1)  # (batch_size, n_components)
+        # Compute differences for all components
+        diff = target.unsqueeze(1) - mu.unsqueeze(0)  # (batch_size, n_components, D)
 
-        log_prob = self.norm_const - det - 0.5 * M
+        # Solve triangular systems for all components
+        z = torch.linalg.solve_triangular(
+            L_sq.unsqueeze(0).expand(batch_size, -1, -1, -1),
+            diff.unsqueeze(-1),
+            upper=False
+        ).squeeze(-1)  # (batch_size, n_components, D)
 
-        nlll = - torch.mean(torch.logsumexp(log_prob + torch.log(pi + 1e-10), 1))
+        # Mahalanobis distances
+        M = torch.sum(z**2, dim=-1)  # (batch_size, n_components)
 
-        return nlll
+        # Log determinants for all components
+        log_dets = torch.sum(torch.log(torch.diagonal(L_sq, dim1=-2, dim2=-1)), dim=-1)  # (n_components,)
+
+        # Log probabilities
+        log_probs = self.norm_const - log_dets.unsqueeze(0) - 0.5 * M
+
+        # Weighted log probabilities
+        weighted_log_probs = log_probs + torch.log(pi + 1e-10)
+
+        # Negative log likelihood
+        nll = -torch.logsumexp(weighted_log_probs, dim=1)
+
+        if weights is not None:
+            loss = (weights * nll).sum() / weights.sum()
+        else:
+            loss = nll.mean()
+
+        return loss
 
 
-class LightningResNet(L.LightningModule):
+class LightningResNet(pl.LightningModule):
 
     time_weight = 0.9
 
@@ -142,7 +252,7 @@ class LightningResNet(L.LightningModule):
 
 
     def __init__(self, label_classes, lr=0.01, step_size=2, gamma=0.1, planes=[8, 16, 32, 64], layers=[1, 1, 1, 1],
-                 block=BasicBlock, include_features=False, features_only=False, n_components=None):
+                 block=BasicBlock, include_features=True, features_only=False, n_components=None, init_mu=None, init_L=None):
         super().__init__()
 
         self.label_classes = label_classes
@@ -155,32 +265,16 @@ class LightningResNet(L.LightningModule):
 
         self.n_components = n_components
 
-        self.backbone = ResNet(block=block, layers=layers, planes=planes, num_outputs=self.num_outputs,
+        self.resnet = ResNet(block=block, layers=layers, planes=planes, num_outputs=self.n_components,
                                include_features=include_features, features_only=features_only)
 
-        if self.num_outputs == len(self.label_classes):
-            # Assume multi-label with the same loss type
-            # self.criterion = nn.MSELoss()
-            self.criterion = MultivariateMDNLoss(self.num_outputs)
-            self.backbone = nn.Sequential(self.backbone,
-                                          MultivariateMDNHead(self.backbone.n_features,
-                                                              self.num_outputs,
-                                                              n_components=self.n_components))
-            self.activations = None
-        else:
-            self.weighted_multilabel = True
-            # Keep this here, since it's for multilabel loss when we have different loss types
-            self.criterion = MultiLabelLoss([self.loss_functions.get(label, nn.MSELoss()) for label in self.label_classes],
-                                            weights=[self.loss_weights.get(label, 1.0) for label in self.label_classes])
-            self.activations = list()
-            for label in self.label_classes:
-                if LMDataset.is_regression(label):
-                    if label == 'time':
-                        self.activations.append(nn.Sequential(nn.Softplus(), nn.Flatten(start_dim=0)))
-                    else:
-                        self.activations.append(nn.Flatten(start_dim=0))
-                else:
-                    self.activations.append(nn.Softmax(dim=1))
+        self.mdn_head = GatedMultivariateMDNHead(self.num_outputs,
+                                                 n_components=self.n_components,
+                                                 init_mu=init_mu,
+                                                 init_L=init_L)
+
+        self.criterion = GatedMDNLoss(self.num_outputs)
+        self.activations = None
 
         self.lr = lr
         self.step_size = step_size
@@ -192,49 +286,8 @@ class LightningResNet(L.LightningModule):
         self.save_hyperparameters()
 
     def forward(self, x):
-        outputs = self.backbone(x)
-        if self.weighted_multilabel:
-            # If we are doing multi-label
-            ret = list()
-            start_idx = 0
-            for act, count in zip(self.activations, self.label_counts):
-                end_idx = start_idx + count
-                ret.append(act(outputs[:, start_idx:end_idx]))
-                start_idx = end_idx
-            return tuple(ret)
-        else:
-            return outputs
-
-
-    def _score(self, step_type, outputs, loss_components, true_labels):
-        total_r2 = 0
-        total_accuracy = 0
-        regression_tasks = 0
-        classification_tasks = 0
-
-
-        for _label_type, _output, _loss, _label in zip(self.label_classes, outputs, loss_components, true_labels):
-            _classes = self.label_classes[_label_type]
-            self.log(f"{step_type}_{_label_type}_loss", _loss, on_step=False, on_epoch=True)
-
-            if _classes is None:
-                r2 = r2_score(_label.cpu().detach().numpy(), _output.cpu().detach().numpy())
-                self.log(f"{step_type}_{_label_type}_r2", r2, on_step=False, on_epoch=True)
-                total_r2 += r2
-                regression_tasks += 1
-            else:
-                preds = torch.argmax(_output, dim=1)
-                acc = accuracy_score(_label.cpu().numpy(), preds.cpu().numpy())
-                self.log(f"{step_type}_{_label_type}_accuracy", acc, on_step=False, on_epoch=True)
-                total_accuracy += acc
-                classification_tasks += 1
-
-        if regression_tasks > 0:
-            mean_r2 = total_r2 / regression_tasks
-            self.log(f'{step_type}_mean_r2', mean_r2, on_step=False, on_epoch=True)
-        if classification_tasks > 0:
-            mean_accuracy = total_accuracy / classification_tasks
-            self.log(f'{step_type}_mean_accuracy', mean_accuracy, on_step=False, on_epoch=True)
+        features, outputs = self.resnet(x)
+        return features, outputs
 
     def training_step(self, batch, batch_idx):
         return self._step('train', batch)
@@ -243,22 +296,15 @@ class LightningResNet(L.LightningModule):
         return self._step('val', batch, on_step=False, on_epoch=True, sync_dist=True)
 
     def _step(self, phase, batch, **log_kwargs):
-        images, labels = batch
-        outputs = self.forward(images)
-        if isinstance(self.criterion, MultiLabelLoss):
-            # Keep this here, since it's for multilabel loss when we have different loss types
-            loss_components = self.criterion(outputs, labels)
-            self._score(phase, outputs, loss_components, labels)
-            total_loss = sum(loss_components)
-            self.log(f'total_{phase}_loss', total_loss)
+        weights = None
+        if len(batch) == 3:
+            images, labels, weights = batch
         else:
-            if isinstance(self.criterion, MultivariateMDNLoss):
-                pi, mu, L = outputs
-                total_loss = self.criterion(pi, mu, L, labels)
-            else:
-                total_loss = self.criterion(outputs, labels)
-            self.log(f'{phase}_loss', total_loss)
-
+            images, labels = batch
+        features, outputs = self.forward(images)
+        pi = self.mdn_head(outputs)
+        total_loss = self.criterion(pi, self.mdn_head.mu, self.mdn_head.sigma_L, labels, weights=weights)
+        self.log(f'{phase}_loss', total_loss, **log_kwargs)
         return total_loss
 
     def configure_optimizers(self):
@@ -267,8 +313,10 @@ class LightningResNet(L.LightningModule):
         return [optimizer], [scheduler]
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
-        x = batch[0]
-        return self.forward(x)
+        images = batch[0]
+        features, outputs = self.forward(images)
+        pi = self.mdn_head(outputs)
+        return features, pi
 
 
 def get_block(block_type):
@@ -287,10 +335,11 @@ def get_layers(layers_cmd):
     layers = [1 if i < int(layers_cmd) else 0 for i in range(4)]
     return layers
 
+label_choices = ['fcs', 'time', 'feed', 'starting_media', 'condition', 'sample'] + LMDataset.FC_COLS
 
 def _add_training_args(parser):
     parser.add_argument("input", help="HDMF input file")
-    parser.add_argument('label', type=str, nargs='+', choices=['fcs', 'time', 'feed', 'starting_media', 'condition', 'sample'], help="the label to train with")
+    parser.add_argument('label', type=str, nargs='+', choices=label_choices, help="the label to train with")
 
     grp = parser.add_mutually_exclusive_group()
     grp.add_argument("--validation", type=str, nargs='+', help="directories containing validation data")
@@ -327,17 +376,33 @@ def _get_loaders_and_model(args,  logger=None):
                                            inference=False,
                                            train_tfm=train_transform,
                                            val_tfm=val_transform,
+                                           return_weights=True,
                                            return_labels=True)
 
-    model_kwargs = dict(lr=args.lr, step_size=args.step_size, gamma=args.gamma, block=args.block, planes=args.planes,
-                        layers=args.layers)
+    if args.checkpoint is not None:
+        model = LightningResNet.load_from_checkpoint(args.checkpoint)
+    else:
+        # This block expects 2D continuous outputs
+        # This was implemented for
+        model_kwargs = dict(lr=args.lr, step_size=args.step_size, gamma=args.gamma, block=args.block, planes=args.planes,
+                            layers=args.layers)
 
-    if args.label == ['fcs']:
-        model_kwargs['features_only'] = True
-        model_kwargs['include_features'] = False
-        model_kwargs['n_components'] = 2
+        model_kwargs['n_components'] = 4
 
-    model = LightningResNet(train_loader.dataset.label_classes, **model_kwargs)
+        dset = train_loader.dataset
+        need_to_open = dset.table is None
+        if need_to_open:
+            dset.open()
+
+        init_mu, init_L = init_mdn(np.asarray(dset.sample_labels).T)
+
+        if need_to_open:
+            dset.close()
+
+        model_kwargs['init_mu'] = init_mu
+        model_kwargs['init_L'] = init_L
+
+        model = LightningResNet(train_loader.dataset.label_classes, **model_kwargs)
 
     return train_loader, val_loader, model
 
@@ -350,13 +415,13 @@ def train(argv=None):
 
     args = parser.parse_args(argv)
 
-    logger = get_logger('info')
+    logger = get_logger('debug')
 
     train_loader, val_loader, model = _get_loaders_and_model(args, logger=logger)
 
     timer = Timer()
     mod_sum = ModelSummary(max_depth=3)
-    trainer = get_trainer(args, 'val_loss' if args.label == ['fcs'] else 'total_val_loss', extra_callbacks=[timer, mod_sum])
+    trainer = get_trainer(args, 'val_loss', extra_callbacks=[timer, mod_sum])
     trainer.fit(model, train_loader, val_loader)
 
     total = timer.time_elapsed('train') + timer.time_elapsed('validate')
@@ -428,8 +493,7 @@ def predict(argv=None):
     parser.add_argument("checkpoint", type=str, help="path to the model checkpoint file to use for inference")
     parser.add_argument("input", type=str, help="HDMF input file")
     parser.add_argument("output", type=str, help="the path to save HDMF-AI table to")
-    parser.add_argument('label', type=str, nargs='+', choices=['fcs', 'time', 'feed', 'starting_media', 'condition', 'sample'], help="the label to predict with")
-    parser.add_argument("-c", "--checkpoint", type=str, help="path to the model checkpoint file to use for inference")
+    parser.add_argument('label', type=str, nargs='+', choices=label_choices, help="the label to predict with")
     parser.add_argument("--split-seed", type=parse_seed, help="seed for dataset splits", default=None)
     parser.add_argument("--exp-split", action='store_true', default=False, help="split samples using experimental conditions, otherwise randomly")
 
@@ -454,19 +518,19 @@ def predict(argv=None):
                          inference=True,
                          tfm=transform,
                          return_labels=True,
+                         return_weights=False,
                          logger=logger)
 
     dataset = loader.dataset
 
-    model = LightningResNet.load_from_checkpoint(args.checkpoint, label_classes=dataset.label_classes,
-                                                 include_features=True, features_only=False)
+    model = LightningResNet.load_from_checkpoint(args.checkpoint, label_classes=dataset.label_classes)
 
     targs = {
         "accelerator": "gpu" if torch.cuda.is_available() else "cpu",
         "limit_predict_batches": 100 if args.quick else None,
         "devices": 1
     }
-    trainer = L.Trainer(**targs)
+    trainer = pl.Trainer(**targs)
 
     logger.info("Running predictions")
 
@@ -484,8 +548,8 @@ def predict(argv=None):
                         description=f"Generated with torch.randperm, with seed {args.split_seed}")
 
     t.add_embedding(features, description="ResNet features")
-    for i, c in enumerate(dataset.FC_COLS):
-        t.add_column(c, description=metadata_info[c]['description'], data=predictions[:, i], col_cls=RegressionOutput)
+    t.add_predicted_probability(predictions,
+                                description="Component classification probabilities")
 
     if dataset.table is None:
         dataset.open()

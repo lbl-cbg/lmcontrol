@@ -15,7 +15,8 @@ from .dataset import LMDataset
 from ..utils import get_logger
 
 
-def get_loaders(args, inference=True, tfm=None, train_tfm=None, val_tfm=None, return_labels=True, logger=None):
+def get_loaders(args, inference=True, tfm=None, train_tfm=None, val_tfm=None, return_labels=True, return_weights=False,
+                logger=None):
     logger = logger or get_logger('warning')
 
     dset_kwargs = dict(logger=logger,
@@ -45,7 +46,8 @@ def get_loaders(args, inference=True, tfm=None, train_tfm=None, val_tfm=None, re
         return loader
     else:
         logger.info(f"Loading training data from {args.input}")
-        train_dataset = LMDataset(args.input, transform=train_tfm, split='train', **dset_kwargs)
+        train_dataset = LMDataset(args.input, transform=train_tfm, split='train', return_weights=return_weights,
+                                  **dset_kwargs)
 
         logger.info(f"Loading validation data from {args.input}")
         val_dataset = LMDataset(args.input, transform=val_tfm, split='validation', **dset_kwargs)
