@@ -26,6 +26,9 @@ from torchvision.models.resnet import BasicBlock, Bottleneck
 from hdmf_ai.results_table import ResultsTable, RegressionOutput
 from hdmf.common import get_hdf5io
 
+import matplotlib.pyplot as plt
+from scipy.stats import multivariate_normal
+
 from ..utils import get_logger, parse_seed, format_time_diff, get_metadata_info, import_ml
 from ..data_utils import load_npzs, encode_labels
 from .dataset import LMDataset, get_transforms as _get_transforms
@@ -492,8 +495,8 @@ def predict(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("checkpoint", type=str, help="path to the model checkpoint file to use for inference")
     parser.add_argument("input", type=str, help="HDMF input file")
-    parser.add_argument("output", type=str, help="the path to save HDMF-AI table to")
     parser.add_argument('label', type=str, nargs='+', choices=label_choices, help="the label to predict with")
+    parser.add_argument("-o", "--output", type=str, help="the path to save HDMF-AI table to", default=None)
     parser.add_argument("--split-seed", type=parse_seed, help="seed for dataset splits", default=None)
     parser.add_argument("--exp-split", action='store_true', default=False, help="split samples using experimental conditions, otherwise randomly")
 
@@ -507,6 +510,9 @@ def predict(argv=None):
     parser.add_argument("-d", "--debug", action='store_true', help="dismantled parallel data loading", default=False)
 
     args = parser.parse_args(argv)
+
+    if args.output is None:
+        args.output = args.checkpoint.replace(".ckpt", ".h5")
 
     logger = get_logger('info')
     transform = _get_transforms('float', 'norm', 'center_crop', 'rgb')
@@ -570,6 +576,101 @@ def predict(argv=None):
     with get_hdf5io(args.output, mode='w') as io:
         io.write(t)
 
+def summarize_mdn(argv=None):
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("checkpoint", type=str, help="path to the model checkpoint file to use for inference")
+    parser.add_argument("input", type=str, help="HDMF input file")
+    parser.add_argument("predictions", type=str, help="HDMF-AI predictions file")
+
+    args = parser.parse_args(argv)
+
+    outdir = os.path.dirname(args.checkpoint)
+    def savefig(filename):
+        return plt.savefig(os.path.join(outdir, filename))
+
+    io = get_hdf5io(args.input)
+    dt = io.read()
+    X = np.array([dt['BL1-A'][:], dt['YL2-A'][:]]).T
+    io.close()
+
+    model = LightningResNet.load_from_checkpoint(args.checkpoint, map_location="cpu")
+    means = model.mdn_head.mu.cpu().detach().numpy()
+    sigma_L = model.mdn_head.sigma_L
+    covs = compute_cov(sigma_L).cpu().detach().numpy()
+    sigma_L = sigma_L.cpu().detach().numpy()
+
+
+    # Create a grid that covers all distributions
+    x, y = np.meshgrid(np.linspace(-0.5, 1.2, 200), np.linspace(-0.5, 1.2, 200))
+    pos = np.dstack((x, y))
+
+    # Plot setup
+    plt.figure(figsize=(5.5, 5))
+    colors = np.array(['red', 'blue', 'green', 'orange'])
+
+    # Plot each Gaussian
+    for i, (mean, cov) in enumerate(zip(means, covs)):
+        rv = multivariate_normal(mean, cov)
+        z = rv.pdf(pos)
+
+        # Plot contours for this Gaussian
+        contours = plt.contour(x, y ,z , colors=colors[i], alpha=0.7, linewidths=0.75)
+
+    plt.scatter(X[:, 0], X[:, 1], s=0.01, c='gray')
+
+    plt.xlabel('BL1', fontsize='x-large')
+    plt.ylabel('YL2', fontsize='x-large')
+    plt.title('MDN Components')
+    plt.axis('equal')
+    plt.tight_layout()
+    savefig('mdn_components.png')
+
+    io = get_hdf5io(args.predictions)
+    rt = io.read()
+    proba = rt['predicted_probability'].data[:]
+    io.close()
+
+    preds = np.argmax(proba, axis=1)
+
+    pred_colors = colors[preds]
+
+    plt.figure(figsize=(5.5, 5))
+    plt.scatter(X[:, 0], X[:, 1], s=0.01, c=pred_colors)
+    plt.xlabel('BL1', fontsize='x-large')
+    plt.ylabel('YL2', fontsize='x-large')
+    plt.axis('equal')
+    plt.title("MDN class prediction")
+    plt.tight_layout()
+    savefig('mdn_class_prediction.png')
+
+    fig, axes = plt.subplots(2, 2, figsize=(7, 7), sharex=True, sharey=True)
+    axes = axes.ravel()
+    for i in range(len(colors)):
+        ax = axes[i]
+        mask = preds == i
+        ax.scatter(X[mask, 0], X[mask, 1], s=0.01, c=colors[i])
+
+        rv = multivariate_normal(means[i], covs[i])
+        z = rv.pdf(pos)
+        # Plot contours for this Gaussian
+        contours = ax.contour(x, y ,z , colors='k', alpha=0.7, linewidths=0.75)
+
+        if i >= 2:
+            ax.set_xlabel('BL1', fontsize='x-large')
+        if i % 2 == 0:
+            ax.set_ylabel('YL2', fontsize='x-large')
+        ax.set_aspect('equal')
+    plt.tight_layout()
+    savefig('mdn_class_prediction_by_class.png')
+
+    plt.figure(figsize=(5.5, 5))
+    plt.hist(np.max(proba, axis=1), bins=100, color='k');
+    plt.title("Max classification probabilities")
+    plt.xlabel("Probability", fontsize='x-large')
+    plt.ylabel("Frequency", fontsize='x-large')
+    plt.tight_layout()
+    savefig('mdn_class_pred_maxprob.png')
 
 
 if __name__ == '__main__':

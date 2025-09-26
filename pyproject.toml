@@ -41,6 +41,7 @@ nn = [
     "umap-learn",
     "optuna",
     "wandb",
+    "matplotlib",
     "optuna-integration[pytorch_lightning]",
     "torch",
     "torchvision",
