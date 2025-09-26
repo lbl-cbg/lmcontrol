@@ -31,7 +31,8 @@ def main():
         'Supervised Learning':{
             'tune': Command('nn.clf.tune', 'Run HPO for classifier or regressor with Optuna'),
             'sup-train': Command('nn.clf.train', 'Train classifier or regressor to predict bioreactor properties from images'),
-            'sup-predict': Command('nn.clf.predict', 'Predict bioreactor properties from images using trained model')
+            'sup-predict': Command('nn.clf.predict', 'Predict bioreactor properties from images using trained model'),
+            'sup-sum': Command('nn.clf.summarize_mdn', 'Plot results for MDN predictions')
         },
     }
     import sys
