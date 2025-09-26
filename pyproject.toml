@@ -24,31 +24,53 @@ classifiers = [
 keywords = [
     "python",
 ]
+dynamic = ["version"]
 
 dependencies = [
     "numpy",
-    "scipy",
-    "scikit-image",
     "scikit-learn",
-    "tqdm",
-    "plotly",
-    "dash",
-    "umap-learn",
-    "torch",
-    "lightning",
-    "lightly",
-    "seaborn",
-    "Pillow",
-    "pandas",
-    "numba",
-    "optuna",
-    "wandb",
-    "openpyxl",
-    "hdmf-ai",
-    "FlowKit",
+    "hdmf",
+    "hdmf-ai @ git+https://github.com/hdmf-dev/hdmf-ai",
 ]
 
-dynamic = ["version"]
+[project.optional-dependencies]
+# --extra-index-url https://pypi.nvidia.com
+# --extra-index-url https://download.pytorch.org/whl/cu129
+nn = [
+    "cuml-cu12==25.6.*",
+    "umap-learn",
+    "optuna",
+    "wandb",
+    "optuna-integration[pytorch_lightning]",
+    "torch",
+    "torchvision",
+    "lightning",
+    "lightly"
+]
+
+viz = [
+    "Pillow",
+    "pandas",
+    "matplotlib",
+    "dash",
+    "plotly"
+]
+
+preprocessing = [
+    "FlowKit @ git+https://github.com/lbl-cbg/FlowKit.git",
+    "numba",
+    "openpyxl",
+    "Pillow",
+    "pandas",
+    "skimage",
+    "tqdm"
+]
+
+dev = [
+    "ruff"
+]
 
 [project.scripts]
 lmcontrol = "lmcontrol:main"
+
+[tool.setuptools_scm]
