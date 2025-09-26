@@ -1,3 +1,4 @@
+import argparse
 from datetime import datetime
 import logging
 import sys
@@ -42,7 +43,7 @@ def parse_seed(string):
             if i > 2**32 - 1:
                 raise ValueError(string)
             return i
-        except :
+        except Exception:
             raise argparse.ArgumentTypeError(f'{string} is not a valid seed')
     else:
         return get_seed()

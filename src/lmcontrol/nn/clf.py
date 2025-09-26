@@ -1,28 +1,18 @@
 import argparse
-import glob
 import math
 import pickle
 import os
-from typing import Type, Union, List, Optional, Callable, Any
 
 from functools import partial
 import lightning as L
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import DataLoader
-import torchvision
-import glob
-import numpy as np
 
 import optuna
 
-from sklearn.metrics import accuracy_score, precision_score, recall_score, confusion_matrix
-from sklearn.preprocessing import LabelEncoder
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-from torch.utils.data import Dataset
-from torch.utils.data import DataLoader
+from sklearn.metrics import accuracy_score
+from sklearn.metrics import r2_score
 from lightning.pytorch.callbacks import ModelSummary, Timer
 from torchvision.models.resnet import BasicBlock, Bottleneck
 
@@ -30,7 +20,6 @@ from hdmf_ai.results_table import ResultsTable, RegressionOutput
 from hdmf.common import get_hdf5io
 
 from ..utils import get_logger, parse_seed, format_time_diff, get_metadata_info
-from ..data_utils import load_npzs, encode_labels
 from .dataset import LMDataset, get_transforms as _get_transforms
 from .resnet import ResNet, add_args as add_resnet_args
 from .utils import get_loaders, get_trainer
@@ -181,12 +170,12 @@ class LightningResNet(L.LightningModule):
         else:
             self.weighted_multilabel = True
             # Keep this here, since it's for multilabel loss when we have different loss types
-            self.criterion = MultiLabelLoss([self.loss_functions.get(l, nn.MSELoss()) for l in self.label_classes],
-                                            weights=[self.loss_weights.get(l, 1.0) for l in self.label_classes])
+            self.criterion = MultiLabelLoss([self.loss_functions.get(label, nn.MSELoss()) for label in self.label_classes],
+                                            weights=[self.loss_weights.get(label, 1.0) for label in self.label_classes])
             self.activations = list()
-            for l in self.label_classes:
-                if LMDataset.is_regression(l):
-                    if l == 'time':
+            for label in self.label_classes:
+                if LMDataset.is_regression(label):
+                    if label == 'time':
                         self.activations.append(nn.Sequential(nn.Softplus(), nn.Flatten(start_dim=0)))
                     else:
                         self.activations.append(nn.Flatten(start_dim=0))
@@ -295,8 +284,7 @@ def get_planes(plane_cmd):
 
 
 def get_layers(layers_cmd):
-    l = int(layers_cmd)
-    layers = [1 if i < l else 0 for i in range(4)]
+    layers = [1 if i < int(layers_cmd) else 0 for i in range(4)]
     return layers
 
 
@@ -389,8 +377,7 @@ def objective(args, trial):
     p = trial.suggest_categorical('planes', ['3', '4'])
     args.planes = get_planes(p)
 
-    l = trial.suggest_categorical('layers', ['1', '2', '3', '4'])
-    args.layers = get_layers(l)
+    args.layers = get_layers(trial.suggest_categorical('layers', ['1', '2', '3', '4']))
 
     args.outdir = os.path.join(args.working_dir, "logs")
     args.experiment = f"trial_{trial.number:04d}"

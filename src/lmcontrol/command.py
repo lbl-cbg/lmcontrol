@@ -13,7 +13,7 @@ def spreadsheet(s):
         f, tmp = f.split(':')
         try:
             sheet = int(tmp)
-        except:
+        except Exception:
             sheet = tmp
 
     if f.endswith('xlsx'):
