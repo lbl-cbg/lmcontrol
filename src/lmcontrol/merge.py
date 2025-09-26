@@ -3,9 +3,8 @@ import argparse
 from .utils import get_logger, get_metadata_info
 from .data_utils import load_npzs
 
-from hdmf.spec import GroupSpec, DatasetSpec, NamespaceBuilder
-from hdmf.backends.hdf5 import HDF5IO, H5DataIO
-from hdmf.common import DynamicTable, load_namespaces, get_hdf5io
+from hdmf.backends.hdf5 import H5DataIO
+from hdmf.common import DynamicTable, get_hdf5io
 import numpy as np
 from sklearn.preprocessing import LabelEncoder
 
@@ -105,7 +104,7 @@ def main(argv=None):
     with get_hdf5io(args.output_h5, 'w') as io:
         io.write(table)
 
-    logger.info(f"DONE")
+    logger.info("DONE")
 
 if __name__ == "__main__":
     main()

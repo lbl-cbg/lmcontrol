@@ -1,5 +1,4 @@
 import os
-import sys
 
 import torch
 from torch.utils.data import DataLoader
@@ -66,8 +65,6 @@ def get_loaders(args, inference=True, tfm=None, train_tfm=None, val_tfm=None, re
 
 
 def get_trainer(args, monitor, mode='min', trial=None, extra_callbacks=None):
-    accelerator = "gpu" if torch.cuda.is_available() else "cpu"
-
     callbacks = []
     if extra_callbacks is not None and len(extra_callbacks) > 0:
         callbacks.extend(extra_callbacks)

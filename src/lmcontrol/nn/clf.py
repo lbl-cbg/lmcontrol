@@ -4,7 +4,6 @@ from itertools import product
 import math
 import pickle
 import os
-from typing import Type, Union, List, Optional, Callable, Any
 
 from functools import partial
 import lightning as pl
@@ -19,12 +18,8 @@ from sklearn.mixture import GaussianMixture
 
 import optuna
 
-from sklearn.metrics import accuracy_score, precision_score, recall_score, confusion_matrix
-from sklearn.preprocessing import LabelEncoder
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-from torch.utils.data import Dataset
-from torch.utils.data import DataLoader
+from sklearn.metrics import accuracy_score
+from sklearn.metrics import r2_score
 from lightning.pytorch.callbacks import ModelSummary, Timer
 from torchvision.models.resnet import BasicBlock, Bottleneck
 
@@ -337,8 +332,7 @@ def get_planes(plane_cmd):
 
 
 def get_layers(layers_cmd):
-    l = int(layers_cmd)
-    layers = [1 if i < l else 0 for i in range(4)]
+    layers = [1 if i < int(layers_cmd) else 0 for i in range(4)]
     return layers
 
 label_choices = ['fcs', 'time', 'feed', 'starting_media', 'condition', 'sample'] + LMDataset.FC_COLS
@@ -448,8 +442,7 @@ def objective(args, trial):
     p = trial.suggest_categorical('planes', ['3', '4'])
     args.planes = get_planes(p)
 
-    l = trial.suggest_categorical('layers', ['1', '2', '3', '4'])
-    args.layers = get_layers(l)
+    args.layers = get_layers(trial.suggest_categorical('layers', ['1', '2', '3', '4']))
 
     args.outdir = os.path.join(args.working_dir, "logs")
     args.experiment = f"trial_{trial.number:04d}"
