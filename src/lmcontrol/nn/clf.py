@@ -351,6 +351,9 @@ def _add_training_args(parser):
     parser.add_argument("--split-seed", type=parse_seed, help="seed for dataset splits", default=None)
     parser.add_argument("--exp-split", action='store_true', default=False, help="split samples using experimental conditions, otherwise randomly")
 
+    parser.add_argument("--balance", action='store_true', help="balance dataset by upsampling low abundance regions", default=False)
+    parser.add_argument("--weight", action='store_true', help="inversely weight samples by their density", default=False)
+
     parser.add_argument("-c","--checkpoint", type=str, help="path to the model checkpoint file to use for inference")
     parser.add_argument("-e", "--epochs", type=int, help="the number of epochs to run for", default=10)
     parser.add_argument("-o", "--outdir", type=str, help="the directory to save output to", default='.')
@@ -379,7 +382,8 @@ def _get_loaders_and_model(args,  logger=None):
                                            inference=False,
                                            train_tfm=train_transform,
                                            val_tfm=val_transform,
-                                           return_weights=True,
+                                           return_weights=args.weight,
+                                           balance=args.balance,
                                            return_labels=True)
 
     if args.checkpoint is not None:
