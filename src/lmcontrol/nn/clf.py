@@ -266,17 +266,10 @@ class LightningResNet(pl.LightningModule):
 
         self.weighted_multilabel = False
 
-        self.n_components = n_components
-
-        self.resnet = ResNet(block=block, layers=layers, planes=planes, num_outputs=self.n_components,
+        self.resnet = ResNet(block=block, layers=layers, planes=planes, num_outputs=1,
                                include_features=include_features, features_only=features_only)
 
-        self.mdn_head = GatedMultivariateMDNHead(self.num_outputs,
-                                                 n_components=self.n_components,
-                                                 init_mu=init_mu,
-                                                 init_L=init_L)
-
-        self.criterion = GatedMDNLoss(self.num_outputs)
+        self.criterion = nn.BCELoss()
         self.activations = None
 
         self.lr = lr
@@ -290,6 +283,7 @@ class LightningResNet(pl.LightningModule):
 
     def forward(self, x):
         features, outputs = self.resnet(x)
+        outputs = torch.sigmoid(outputs)
         return features, outputs
 
     def training_step(self, batch, batch_idx):
@@ -305,9 +299,29 @@ class LightningResNet(pl.LightningModule):
         else:
             images, labels = batch
         features, outputs = self.forward(images)
-        pi = self.mdn_head(outputs)
-        total_loss = self.criterion(pi, self.mdn_head.mu, self.mdn_head.sigma_L, labels, weights=weights)
-        self.log(f'{phase}_loss', total_loss, **log_kwargs)
+        total_loss = self.criterion(outputs, labels)
+
+        # Get predictions
+        preds = (outputs >= 0.5).float()
+
+        # Calculate accuracy
+        acc = (preds == labels).float().mean()
+
+        # Calculate precision and recall
+        true_positives = ((preds == 1) & (labels == 1)).float().sum()
+        false_positives = ((preds == 1) & (labels == 0)).float().sum()
+        false_negatives = ((preds == 0) & (labels == 1)).float().sum()
+
+        precision = true_positives / (true_positives + false_positives + 1e-8)
+        recall = true_positives / (true_positives + false_negatives + 1e-8)
+
+        self.log_dict({
+            f'{phase}_loss': total_loss,
+            f'{phase}_acc': acc,
+            f'{phase}_precision': precision,
+            f'{phase}_recall': recall
+        }, **log_kwargs)
+
         return total_loss
 
     def configure_optimizers(self):
@@ -318,8 +332,7 @@ class LightningResNet(pl.LightningModule):
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
         images = batch[0]
         features, outputs = self.forward(images)
-        pi = self.mdn_head(outputs)
-        return features, pi
+        return features, outputs
 
 
 def get_block(block_type):
@@ -342,7 +355,7 @@ label_choices = ['fcs', 'time', 'feed', 'starting_media', 'condition', 'sample']
 
 def _add_training_args(parser):
     parser.add_argument("input", help="HDMF input file")
-    parser.add_argument('label', type=str, nargs='+', choices=label_choices, help="the label to train with")
+    #parser.add_argument('label', type=str, nargs='+', choices=label_choices, help="the label to train with")
 
     grp = parser.add_mutually_exclusive_group()
     grp.add_argument("--validation", type=str, nargs='+', help="directories containing validation data")
@@ -394,20 +407,6 @@ def _get_loaders_and_model(args,  logger=None):
         model_kwargs = dict(lr=args.lr, step_size=args.step_size, gamma=args.gamma, block=args.block, planes=args.planes,
                             layers=args.layers)
 
-        model_kwargs['n_components'] = 4
-
-        dset = train_loader.dataset
-        need_to_open = dset.table is None
-        if need_to_open:
-            dset.open()
-
-        init_mu, init_L = init_mdn(np.asarray(dset.sample_labels).T)
-
-        if need_to_open:
-            dset.close()
-
-        model_kwargs['init_mu'] = init_mu
-        model_kwargs['init_L'] = init_L
 
         model = LightningResNet(train_loader.dataset.label_classes, **model_kwargs)
 

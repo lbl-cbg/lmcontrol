@@ -449,16 +449,7 @@ class LMDataset(Dataset):
 
         self.return_labels = return_labels
 
-        if return_labels:
-            if not isinstance(label, (tuple, list)) or len(label) == 1:
-                label = label[0] if isinstance(label, (tuple, list)) else label
-                if label.lower() == 'fcs':
-                    label = self.FC_COLS
-                else:
-                    label = [label]
-
         # The labels to return
-        self.label = label
 
         # Labels for each sample
         self.sample_labels = None
@@ -482,40 +473,8 @@ class LMDataset(Dataset):
 
         self.open()
 
-        self.__len = len(self.table)
-
         self.exp_split = exp_split
         self.rand_split = rand_split
-
-        if exp_split:
-            # Use this function if you ever want to revisit campaign-based splitting
-            # train_mask, val_mask, test_mask = make_masks(self.table, split_validation=True, seed=split_seed)
-
-            # For now, lets just split based on ht
-            train_mask, val_mask, test_mask = make_ht_masks(self.table, seed=split_seed)
-            split_mask = np.zeros(self.__len, dtype=int)
-            split_mask[train_mask] = self.split_vals['train']
-            split_mask[val_mask] = self.split_vals['validation']
-            split_mask[test_mask] = self.split_vals['test']
-            self._set_split(split_mask)
-        elif rand_split:
-            self.set_random_split(0.1, 0.1, seed=split_seed)
-
-
-        if return_weights or balance:
-            # Compute densities ONLY for the data in the subset we are using
-            X = np.array(self.sample_labels).T
-            idx = np.s_[:] if self.subset is None else self.subset
-            densities = compute_densities(X[idx])
-            if return_weights:
-                self.weights = np.zeros(X.shape[0], dtype=np.float32)
-                self.weights[idx] = self._compute_weights_log(densities).astype(np.float32)
-
-            if balance:
-                weights  = 1 / densities
-                weights = np.round(weights / weights.min()).astype(int)
-                self.subset = np.repeat(np.arange(len(weights)), weights)
-
 
         self.close()
 
@@ -550,22 +509,16 @@ class LMDataset(Dataset):
                 self.table = self.io.read()
 
 
-            self.label_classes = dict()
+            self.label_classes = {"stressed": None}
 
-            if self.return_labels:
-                self.sample_labels = []
-                for k in self.label:
-                    if isinstance(self.table[k], EnumData):
-                        self.label_classes[k] = self.table[k].elements.data[:]
-                    else:
-                        self.label_classes[k] = None
+            self.sample_labels = ((self.table['BL1-A'][:] > 0.42) & (self.table['condition'].data[:] == 3)).astype(int)
 
-                    # Convert to 32-bit floating point to avoid issues with Torch
-                    # (By default, Torch assumes single precision floats)
-                    labels = self.table[k].data[:]
-                    if isinstance(labels[0], np.floating):
-                        labels = labels.astype(np.float32)
-                    self.sample_labels.append(labels)
+            ht_data = self.table['ht'].data[:]
+            split_mask = np.zeros(len(self.sample_labels), dtype=int) - 1
+            split_mask[ht_data == 10] = 0
+            split_mask[ht_data == 9] = 1
+            split_mask[ht_data == 11] = 2
+            self._set_split(split_mask)
 
 
     def close(self):
@@ -606,8 +559,6 @@ class LMDataset(Dataset):
         self.split_mask = torch.as_tensor(split_mask)
         if self.split is not None:
             self.subset = torch.where(self.split_mask == self.split_vals[self.split])[0]
-            self.__len = len(self.subset)
-
 
     def __getitem__(self, i):
         i = i if self.subset is None else self.subset[i]
@@ -626,8 +577,7 @@ class LMDataset(Dataset):
         if self.sample_labels is None:
             return ret
         else:
-            ret_tmp = [torch.as_tensor(self.sample_labels[j][i])
-                       for j in range(len(self.sample_labels))]
+            ret_tmp = [torch.as_tensor(self.sample_labels[i])]
 
             # Keep this here, since it's for mulltlabel loss when we have different loss types
             # return ret, tuple(ret_tmp)
