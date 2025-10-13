@@ -1,6 +1,7 @@
 import warnings
 
 # function 'norm ' has been modified. Please keep a check of it.
+import cupy as cp
 import numpy as np
 import torch
 from torch.utils.data import Dataset
@@ -367,7 +368,10 @@ def compute_densities(X):
     b = 1024
     densities = list()
     for i in range(0, X_white.shape[0], b):
-        densities.append(np.exp(kde.score_samples(X_white[i:i+b])).get())
+        tmp = np.exp(kde.score_samples(X_white[i:i+b]))
+        if isinstance(tmp, cp.ndarray):
+            tmp = tmp.get()
+        densities.append(tmp)
     densities = np.concatenate(densities)
 
     return densities
@@ -416,7 +420,7 @@ class LMDataset(Dataset):
         return (label in cls.__regression_labels) or (label in cls.FC_COLS)
 
     def __init__(self, path, label_classes=None, return_labels=False, logger=None, transform=None,
-                 label=None, split=None, rand_split=False, exp_split=False, split_seed=None, return_weights=False):
+                 label=None, split=None, rand_split=False, exp_split=False, split_seed=None, return_weights=False, balance=False):
         """
 
         Args:
@@ -459,6 +463,7 @@ class LMDataset(Dataset):
         # Labels for each sample
         self.sample_labels = None
         self.weights = None
+        self.upsample = None
 
         self.transform = transform
 
@@ -470,17 +475,12 @@ class LMDataset(Dataset):
         self.split_mask = None
 
         # The actual indices of the data subset to return
-        self.subset = None
+        self._subset = None
 
         self.io = None
         self.table = None
 
         self.open()
-
-        if return_weights:
-            X = np.array(self.sample_labels).T
-            densities = compute_densities(X)
-            self.weights = self._compute_weights(densities).astype(np.float32)
 
         self.__len = len(self.table)
 
@@ -497,9 +497,25 @@ class LMDataset(Dataset):
             split_mask[train_mask] = self.split_vals['train']
             split_mask[val_mask] = self.split_vals['validation']
             split_mask[test_mask] = self.split_vals['test']
-            self.set_split(split_mask)
+            self._set_split(split_mask)
         elif rand_split:
             self.set_random_split(0.1, 0.1, seed=split_seed)
+
+
+        if return_weights or balance:
+            # Compute densities ONLY for the data in the subset we are using
+            X = np.array(self.sample_labels).T
+            idx = np.s_[:] if self.subset is None else self.subset
+            densities = compute_densities(X[idx])
+            if return_weights:
+                self.weights = np.zeros(X.shape[0], dtype=np.float32)
+                self.weights[idx] = self._compute_weights_log(densities).astype(np.float32)
+
+            if balance:
+                weights  = 1 / densities
+                weights = np.round(weights / weights.min()).astype(int)
+                self.subset = np.repeat(np.arange(len(weights)), weights)
+
 
         self.close()
 
@@ -507,16 +523,22 @@ class LMDataset(Dataset):
         # We want to specify them after they have been computed to ensure the same label classes are
         # used across splits (e.g. training, validation, test sets)
 
+    @property
+    def subset(self):
+        return self._subset
+
+    @subset.setter
+    def subset(self, val):
+        self._subset = val
+        self.__len = len(val)
+
     def _compute_weights_log(self, densities):
+        densities = densities + 1e-10
         weights = -np.log10(densities/densities.sum())
-        a, b = weights.min(), weights.max()
-        weights = (weights - a) / (b - a)
         return weights
 
     def _compute_weights(self, densities):
-        weights = 1 / densities
-        a, b = weights.min(), weights.max()
-        weights = (weights - a) / (b - a)
+        weights = 1 / (densities + 1e-8)
         return weights
 
     def open(self, worker_id=None):
@@ -575,12 +597,12 @@ class LMDataset(Dataset):
 
         split = split[torch.randperm(n, generator=rng)]
 
-        self.set_split(split)
+        self._set_split(split)
 
         if close:
             self.close()
 
-    def set_split(self, split_mask):
+    def _set_split(self, split_mask):
         self.split_mask = torch.as_tensor(split_mask)
         if self.split is not None:
             self.subset = torch.where(self.split_mask == self.split_vals[self.split])[0]
